@@ -513,8 +513,8 @@
         return false;
     }
 
-    // Keyboard
-    window.addEventListener("keydown", function (e) {
+    // Keyboard handler
+    function onKeyDown(e) {
         const k = e.key;
 
         if (state === ST.TITLE) {
@@ -549,7 +549,9 @@
                 btnFlash["f"] = 0.2;
             }
         }
-    });
+    }
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown);
 
     // Pointer (mouse + touch)
     function ptrPos(cx, cy) {
