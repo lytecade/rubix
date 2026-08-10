@@ -1,8 +1,3 @@
-// ============================================================
-//  RUBIX — 2D Rubik's Cube Simulator (Cyberpunk / Arcade)
-//  Pure HTML5 Canvas + Vanilla JS — No external libraries
-// ============================================================
-
 (function () {
     "use strict";
 
