@@ -1,19 +1,44 @@
-# Rubix
+# Rubix — Cyberpunk 2D Rubik's Cube Solver
 
-A cyberpunk-themed 2D Rubik's Cube simulator built with HTML5 Canvas and vanilla JavaScript.
+> A retro-futuristic arcade puzzle game built with vanilla HTML5/JavaScript.
 
 ## Overview
 
-Rubix is an arcade-style puzzle game featuring a 2D representation of a Rubik's Cube with three visible faces at a time. Choose between Casual mode (move counter only) or Challenge mode (high-score based on speed and efficiency).
+**Rubix** is a 2D Rubik's cube solver game with a cyberpunk/sci-fi aesthetic. The game uses the Arne16 color palette and features a square canvas that auto-scales to fit any browser window.
 
 ## Features
 
-- **Cyberpunk/Sci-fi aesthetic** using the Arne16 color palette
-- **Two game modes**: Casual and Challenge
-- **Responsive square canvas** that scales to any browser window
-- **Dual control scheme**: On-screen buttons for mobile + keyboard shortcuts
-- **Cube flipping**: Toggle between front/upper/right and left/back/down views
-- **Move tracking and scoring system**
+- **2D cube view** — Displays three faces of the cube at a time in a cross layout
+- **Full rotation controls** — Clockwise and counter-clockwise rotations for all 6 faces
+- **View switching** — Rotate the camera to see different angles of the cube
+- **Cyberpunk theme** — Neon glow effects, dark backgrounds, sci-fi typography
+- **Dual input support**
+  - **Mouse/Touch** — Click or tap buttons directly
+  - **Keyboard** — Arrow keys to navigate controls, Enter/Space to activate
+- **Move & time tracking** — Tracks both move count and elapsed time
+- **Record keeping** — Saves best times and fewest moves in localStorage
+- **Responsive design** — Square canvas scales to maximum browser fit
+
+## Color Palette (Arne16)
+
+| Color | Hex |
+|-------|-----|
+| Black | `#000000` |
+| Gray | `#9D9D9D` |
+| White | `#FFFFFF` |
+| Crimson | `#BE2633` |
+| Pink | `#E06F8B` |
+| Dark Brown | `#493C2B` |
+| Brown | `#A46422` |
+| Orange | `#EB8931` |
+| Yellow | `#F7E26B` |
+| Teal | `#2F484E` |
+| Dark Green | `#44891A` |
+| Lime | `#A3CE27` |
+| Navy | `#1B2632` |
+| Dark Blue | `#005784` |
+| Cyan | `#31A2F2` |
+| Light Cyan | `#B2DCEF` |
 
 ## Controls
 
@@ -21,46 +46,56 @@ Rubix is an arcade-style puzzle game featuring a 2D representation of a Rubik's 
 
 | Key | Action |
 |-----|--------|
-| `1` | Rotate left vertical section |
-| `2` | Rotate center vertical section |
-| `3` | Rotate right vertical section |
-| `4` | Rotate top horizontal section |
-| `5` | Rotate middle horizontal section |
-| `6` | Rotate bottom horizontal section |
-| `F` | Flip cube to show other 3 sides |
-| `Enter` / `Space` | Confirm selection on menus |
-| `1` / `2` | Select Casual or Challenge mode |
+| `Arrow Up` / `Arrow Down` | Navigate between controls vertically |
+| `Arrow Left` / `Arrow Right` | Navigate between controls horizontally |
+| `Enter` / `Space` | Activate selected button |
+| Any key | Start game from title screen |
 
-### Touch / Mouse
+### Mouse / Touch
 
-Tap or click any on-screen button to perform the corresponding action.
+- **Click/Tap** any button to activate it
+- Buttons are arranged in rows for easy access
 
-## Game Modes
+### Game Buttons
 
-### Casual Mode
-Relax and solve the cube at your own pace. Only the move counter is displayed — no time pressure.
+- **U / U'** — Rotate Up face clockwise / counter-clockwise
+- **D / D'** — Rotate Down face clockwise / counter-clockwise
+- **F / F'** — Rotate Front face clockwise / counter-clockwise
+- **B / B'** — Rotate Back face clockwise / counter-clockwise
+- **L / L'** — Rotate Left face clockwise / counter-clockwise
+- **R / R'** — Rotate Right face clockwise / counter-clockwise
+- **◀ View ▶** — Cycle through different camera angles
 
-### Challenge Mode
-Beat the clock and minimize your moves! Your score is calculated as:
+## Game Flow
+
+1. **Title Screen** — Press any key or click/tap to begin
+2. **Gameplay** — Solve the scrambled cube using rotation controls
+3. **Victory Screen** — See your move count, time, and any records broken
+4. **Play Again** — Return to gameplay with a fresh scramble
+
+## Face Color Mapping
+
+| Face | Color |
+|------|-------|
+| Up | White |
+| Down | Yellow |
+| Front | Crimson |
+| Back | Orange |
+| Left | Cyan |
+| Right | Lime |
+
+## Files
 
 ```
-Score = max(0, 100000 - (moves × 500) - (seconds × 100))
+├── index.html    # Game container and canvas
+├── game.js       # All game logic and rendering
+└── README.md     # This file
 ```
 
-Fewer moves and less time = higher score. Your best score is saved in the browser.
+## Browser Support
 
-## How to Play
+Modern browsers with Canvas 2D support: Chrome, Firefox, Safari, Edge, and mobile browsers.
 
-1. Launch `index.html` in any modern browser
-2. Press a key or tap the title screen to begin
-3. Select **Casual** or **Challenge** mode
-4. Rotate sections using the buttons or keyboard shortcuts
-5. Use **Flip (F)** to view the back side of the cube
-6. Solve all 6 faces to win!
+## License
 
-## Technical Details
-
-- **No external libraries** — pure HTML5, CSS, and JavaScript
-- **Canvas-based rendering** for smooth visuals
-- **Arne16 color palette** throughout
-
+Free to use and modify. No external dependencies.
