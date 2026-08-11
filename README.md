@@ -1,10 +1,6 @@
 # Rubix — Cyberpunk 2D Rubik's Cube Solver
 
-> A retro-futuristic arcade puzzle game built with vanilla HTML5/JavaScript.
-
-## Overview
-
-**Rubix** is a 2D Rubik's cube solver game with a cyberpunk/sci-fi aesthetic. The game uses the Arne16 color palette and features a square canvas that auto-scales to fit any browser window.
+A retro-futuristic arcade puzzle game built with vanilla HTML5/JavaScript. **Rubix** is a 2D Rubik's cube solver game where the player can track the moves and time in-game and have it saved to local storage. 
 
 ## Features
 
@@ -18,27 +14,6 @@
 - **Move & time tracking** — Tracks both move count and elapsed time
 - **Record keeping** — Saves best times and fewest moves in localStorage
 - **Responsive design** — Square canvas scales to maximum browser fit
-
-## Color Palette (Arne16)
-
-| Color | Hex |
-|-------|-----|
-| Black | `#000000` |
-| Gray | `#9D9D9D` |
-| White | `#FFFFFF` |
-| Crimson | `#BE2633` |
-| Pink | `#E06F8B` |
-| Dark Brown | `#493C2B` |
-| Brown | `#A46422` |
-| Orange | `#EB8931` |
-| Yellow | `#F7E26B` |
-| Teal | `#2F484E` |
-| Dark Green | `#44891A` |
-| Lime | `#A3CE27` |
-| Navy | `#1B2632` |
-| Dark Blue | `#005784` |
-| Cyan | `#31A2F2` |
-| Light Cyan | `#B2DCEF` |
 
 ## Controls
 
@@ -84,18 +59,3 @@
 | Left | Cyan |
 | Right | Lime |
 
-## Files
-
-```
-├── index.html    # Game container and canvas
-├── game.js       # All game logic and rendering
-└── README.md     # This file
-```
-
-## Browser Support
-
-Modern browsers with Canvas 2D support: Chrome, Firefox, Safari, Edge, and mobile browsers.
-
-## License
-
-Free to use and modify. No external dependencies.
