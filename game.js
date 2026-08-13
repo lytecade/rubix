@@ -14,10 +14,16 @@ var FO=["U","D","F","B","L","R"];
 
 var canvas=document.getElementById("game"),ctx=canvas.getContext("2d"),BASE=1000,scale=1;
 function resize(){
-  var w=window.innerWidth,h=window.innerHeight;
-  scale=Math.min(w/BASE,h/BASE);
-  canvas.width=w;
-  canvas.height=h;
+  var w = window.innerWidth, h = window.innerHeight;
+  scale = Math.min(w / BASE, h / BASE);
+  
+  // Keep internal resolution fixed to match your drawing logic
+  canvas.width = BASE;
+  canvas.height = BASE;
+  
+  // Scale the display size to fit the window
+  canvas.style.width = (BASE * scale) + "px";
+  canvas.style.height = (BASE * scale) + "px";
 }
 window.addEventListener("resize",resize);resize();
 
@@ -124,10 +130,19 @@ case"Enter":case" ":activateButton(focusedButton);e.preventDefault();break;}
 });
 
 function getButtonAt(mx,my){for(var i=0;i<buttons.length;i++){var b=buttons[i];if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h)return i;}return-1;}
-function handlePointer(x,y){var mx=x/scale,my=y/scale;
-if(gameState===TITLE){startGame();return;}
-if(gameState===WON){gameState=TITLE;return;}
-var idx=getButtonAt(mx,my);if(idx>=0){focusedButton=idx;activateButton(idx);}}
+
+function handlePointer(x, y){
+  var rect = canvas.getBoundingClientRect();
+  // Convert viewport coordinates to canvas coordinates, adjusted for scale
+  var mx = (x - rect.left) / scale;
+  var my = (y - rect.top) / scale;
+  
+  if(gameState===TITLE){startGame();return;}
+  if(gameState===WON){gameState=TITLE;return;}
+  var idx=getButtonAt(mx,my);if(idx>=0){focusedButton=idx;activateButton(idx);}
+}
+
+
 canvas.addEventListener("mousedown",function(e){handlePointer(e.clientX,e.clientY);});
 canvas.addEventListener("touchstart",function(e){e.preventDefault();var t=e.touches[0];handlePointer(t.clientX,t.clientY);},{passive:false});
 
