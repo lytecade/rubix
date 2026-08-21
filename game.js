@@ -1,1077 +1,825 @@
-// ============================================================
-//  RUBIX - Cyberpunk 2D Rubik's Cube Solver
-//  Vanilla HTML5/JavaScript, Arne16 colorscheme
-// ============================================================
-(function () {
-  "use strict";
+'use strict';
+/* ============================================================
+ *  R U B I X
+ *  Arcade cyberpunk Rubik's cube solver.
+ *  HTML5 canvas + vanilla JS. No external libraries.
+ *  Colors: Arne16 palette ONLY.
+ * ============================================================ */
 
-  var C = [
-    "#000000",
-    "#9D9D9D",
-    "#FFFFFF",
-    "#BE2633",
-    "#E06F8B",
-    "#493C2B",
-    "#A46422",
-    "#EB8931",
-    "#F7E26B",
-    "#2F484E",
-    "#44891A",
-    "#A3CE27",
-    "#1B2632",
-    "#005784",
-    "#31A2F2",
-    "#B2DCEF",
-  ];
-  var BLK = 0,
-    GRY = 1,
-    WHT = 2,
-    CRI = 3,
-    PNK = 4,
-    DRB = 5,
-    BRW = 6,
-    ORG = 7,
-    YLW = 8,
-    TEL = 9,
-    DGN = 10,
-    LIM = 11,
-    NVY = 12,
-    DBL = 13,
-    CYA = 14,
-    LCA = 15;
-  function col(c) {
-    return C[c];
+/* ---------------- Arne16 palette ---------------- */
+const ARNE = ['#000000', '#9D9D9D', '#FFFFFF', '#BE2633', '#E06F8B',
+              '#493C2B', '#A46422', '#EB8931', '#F7E26B', '#2F484E',
+              '#44891A', '#A3CE27', '#1B2632', '#005784', '#31A2F2', '#B2DCEF'];
+
+const BG     = '#000000';
+const DIM    = '#9D9D9D';
+const WHITE  = '#FFFFFF';
+const RED    = '#BE2633';
+const PINK   = '#E06F8B';
+const COAL   = '#493C2B';
+const BROWN  = '#A46422';
+const ORANGE = '#EB8931';
+const GOLD   = '#F7E26B';
+const TEAL   = '#2F484E';
+const GRN    = '#44891A';
+const LIME   = '#A3CE27';
+const PANEL  = '#1B2632';
+const BLUE   = '#005784';
+const NEON   = '#31A2F2';
+const ICE    = '#B2DCEF';
+
+/* nearest-palette color to (color * factor) — keeps shading in-palette */
+function hexRGB(h) {
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
+function nearestPalette(hex, factor) {
+  const [r, g, b] = hexRGB(hex);
+  let best = ARNE[0], bd = Infinity;
+  for (const c of ARNE) {
+    const [R, G, B] = hexRGB(c);
+    const d = (R - r * factor) ** 2 + (G - g * factor) ** 2 + (B - b * factor) ** 2;
+    if (d < bd) { bd = d; best = c; }
   }
-  var FC = { U: WHT, D: YLW, F: CRI, B: ORG, L: CYA, R: LIM };
-  var FN = { U: "UP", D: "DOWN", F: "FRONT", B: "BACK", L: "LEFT", R: "RIGHT" };
-  var FO = ["U", "D", "F", "B", "L", "R"];
+  return best;
+}
 
-  var canvas = document.getElementById("game"),
-    ctx = canvas.getContext("2d"),
-    BASE = 1000,
-    scale = 1;
-  function resize() {
-    var w = window.innerWidth,
-      h = window.innerHeight;
-    scale = Math.min(w / BASE, h / BASE);
+/* Cube face colors (bright tier) */
+const FACE_COLORS = {
+  '+x': RED,    // right
+  '-x': ORANGE, // left
+  '+y': WHITE,  // top
+  '-y': GOLD,   // bottom
+  '+z': NEON,   // front
+  '-z': GRN     // back
+};
+/* shading tiers per base color: [bright, mid, dark] */
+const SHADES = {};
+for (const k in FACE_COLORS) {
+  const base = FACE_COLORS[k];
+  SHADES[base] = [base, nearestPalette(base, 0.62), nearestPalette(base, 0.34)];
+}
 
-    // Keep internal resolution fixed to match your drawing logic
-    canvas.width = BASE;
-    canvas.height = BASE;
+/* ---------------- canvas / scaling ---------------- */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const LOGICAL = 800;          // 800x800 logical square
+let unit = 1;
 
-    // Scale the display size to fit the window
-    canvas.style.width = BASE * scale + "px";
-    canvas.style.height = BASE * scale + "px";
-  }
-  window.addEventListener("resize", resize);
-  resize();
+function resize() {
+  const s = Math.max(200, Math.min(window.innerWidth, window.innerHeight));
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = s + 'px';
+  canvas.style.height = s + 'px';
+  canvas.width = Math.round(s * dpr);
+  canvas.height = Math.round(s * dpr);
+  unit = canvas.width / LOGICAL;
+}
+window.addEventListener('resize', resize);
+resize();
 
-  var TITLE = 0,
-    PLAYING = 1,
-    WON = 2;
-  var gameState = TITLE,
-    cube = {},
-    moves = 0,
-    startTime = 0,
-    elapsed = 0,
-    currentView = 0;
-  var brokeTime = false,
-    brokeMoves = false;
-
-  var VIEWS = [
-    { t: "U", c: "F", s: "R", d: "right" },
-    { t: "U", c: "F", s: "L", d: "left" },
-    { t: "U", c: "B", s: "R", d: "right" },
-    { t: "U", c: "B", s: "L", d: "left" },
-    { t: "D", c: "F", s: "R", d: "right" },
-    { t: "D", c: "F", s: "L", d: "left" },
-    { t: "D", c: "B", s: "R", d: "right" },
-    { t: "D", c: "B", s: "L", d: "left" },
-  ];
-
-  var stars = [];
-  function genStars() {
-    stars = [];
-    for (var i = 0; i < 80; i++)
-      stars.push({
-        x: Math.random() * BASE,
-        y: Math.random() * BASE,
-        sz: Math.random() * 2 + 0.5,
-        sp: Math.random() * 0.4 + 0.1,
-        br: Math.random(),
-      });
-  }
-  genStars();
-
-  function makeCube() {
-    var c = {};
-    for (var i = 0; i < FO.length; i++) {
-      var f = FO[i];
-      c[f] = [FC[f], FC[f], FC[f], FC[f], FC[f], FC[f], FC[f], FC[f], FC[f]];
-    }
-    return c;
-  }
-
-  function isSolved(c) {
-    for (var i = 0; i < FO.length; i++) {
-      var f = FO[i],
-        t = FC[f];
-      for (var j = 0; j < 9; j++) if (c[f][j] !== t) return false;
-    }
-    return true;
-  }
-
-  function rotCW(a) {
-    var t = a[0];
-    a[0] = a[6];
-    a[6] = a[8];
-    a[8] = a[2];
-    a[2] = t;
-    t = a[1];
-    a[1] = a[3];
-    a[3] = a[7];
-    a[7] = a[5];
-    a[5] = t;
-  }
-
-  function rotateFace(face, cw) {
-    if (cw) {
-      rotCW(cube[face]);
-    } else {
-      rotCW(cube[face]);
-      rotCW(cube[face]);
-      rotCW(cube[face]);
-    }
-    var t;
-    if (face === "U") {
-      if (cw) {
-        t = [cube.F[0], cube.F[1], cube.F[2]];
-        cube.F[0] = cube.L[0];
-        cube.F[1] = cube.L[1];
-        cube.F[2] = cube.L[2];
-        cube.L[0] = cube.B[6];
-        cube.L[1] = cube.B[7];
-        cube.L[2] = cube.B[8];
-        cube.B[6] = cube.R[0];
-        cube.B[7] = cube.R[1];
-        cube.B[8] = cube.R[2];
-        cube.R[0] = t[0];
-        cube.R[1] = t[1];
-        cube.R[2] = t[2];
-      } else {
-        t = [cube.F[0], cube.F[1], cube.F[2]];
-        cube.F[0] = cube.R[0];
-        cube.F[1] = cube.R[1];
-        cube.F[2] = cube.R[2];
-        cube.R[0] = cube.B[6];
-        cube.R[1] = cube.B[7];
-        cube.R[2] = cube.B[8];
-        cube.B[6] = cube.L[0];
-        cube.B[7] = cube.L[1];
-        cube.B[8] = cube.L[2];
-        cube.L[0] = t[0];
-        cube.L[1] = t[1];
-        cube.L[2] = t[2];
-      }
-    } else if (face === "D") {
-      if (cw) {
-        t = [cube.F[6], cube.F[7], cube.F[8]];
-        cube.F[6] = cube.R[6];
-        cube.F[7] = cube.R[7];
-        cube.F[8] = cube.R[8];
-        cube.R[6] = cube.B[2];
-        cube.R[7] = cube.B[1];
-        cube.R[8] = cube.B[0];
-        cube.B[2] = cube.L[6];
-        cube.B[1] = cube.L[7];
-        cube.B[0] = cube.L[8];
-        cube.L[6] = t[0];
-        cube.L[7] = t[1];
-        cube.L[8] = t[2];
-      } else {
-        t = [cube.F[6], cube.F[7], cube.F[8]];
-        cube.F[6] = cube.L[6];
-        cube.F[7] = cube.L[7];
-        cube.F[8] = cube.L[8];
-        cube.L[6] = cube.B[2];
-        cube.L[7] = cube.B[1];
-        cube.L[8] = cube.B[0];
-        cube.B[2] = cube.R[6];
-        cube.B[1] = cube.R[7];
-        cube.B[0] = cube.R[8];
-        cube.R[6] = t[0];
-        cube.R[7] = t[1];
-        cube.R[8] = t[2];
-      }
-    } else if (face === "F") {
-      if (cw) {
-        t = [cube.U[6], cube.U[7], cube.U[8]];
-        cube.U[6] = cube.L[8];
-        cube.U[7] = cube.L[5];
-        cube.U[8] = cube.L[2];
-        cube.L[8] = cube.D[0];
-        cube.L[5] = cube.D[1];
-        cube.L[2] = cube.D[2];
-        cube.D[0] = cube.R[6];
-        cube.D[1] = cube.R[3];
-        cube.D[2] = cube.R[0];
-        cube.R[6] = t[0];
-        cube.R[3] = t[1];
-        cube.R[0] = t[2];
-      } else {
-        t = [cube.U[6], cube.U[7], cube.U[8]];
-        cube.U[6] = cube.R[6];
-        cube.U[7] = cube.R[3];
-        cube.U[8] = cube.R[0];
-        cube.R[6] = cube.D[2];
-        cube.R[3] = cube.D[1];
-        cube.R[0] = cube.D[0];
-        cube.D[2] = cube.L[2];
-        cube.D[1] = cube.L[5];
-        cube.D[0] = cube.L[8];
-        cube.L[2] = t[0];
-        cube.L[5] = t[1];
-        cube.L[8] = t[2];
-      }
-    } else if (face === "B") {
-      if (cw) {
-        t = [cube.U[0], cube.U[1], cube.U[2]];
-        cube.U[0] = cube.R[8];
-        cube.U[1] = cube.R[5];
-        cube.U[2] = cube.R[2];
-        cube.R[8] = cube.D[8];
-        cube.R[5] = cube.D[7];
-        cube.R[2] = cube.D[6];
-        cube.D[8] = cube.L[0];
-        cube.D[7] = cube.L[3];
-        cube.D[6] = cube.L[6];
-        cube.L[0] = t[0];
-        cube.L[3] = t[1];
-        cube.L[6] = t[2];
-      } else {
-        t = [cube.U[0], cube.U[1], cube.U[2]];
-        cube.U[0] = cube.L[0];
-        cube.U[1] = cube.L[3];
-        cube.U[2] = cube.L[6];
-        cube.L[0] = cube.D[8];
-        cube.L[3] = cube.D[7];
-        cube.L[6] = cube.D[6];
-        cube.D[8] = cube.R[2];
-        cube.D[7] = cube.R[5];
-        cube.D[6] = cube.R[8];
-        cube.R[2] = t[0];
-        cube.R[5] = t[1];
-        cube.R[8] = t[2];
-      }
-    } else if (face === "L") {
-      if (cw) {
-        t = [cube.U[0], cube.U[3], cube.U[6]];
-        cube.U[0] = cube.B[8];
-        cube.U[3] = cube.B[5];
-        cube.U[6] = cube.B[2];
-        cube.B[8] = cube.D[0];
-        cube.B[5] = cube.D[3];
-        cube.B[2] = cube.D[6];
-        cube.D[0] = cube.F[0];
-        cube.D[3] = cube.F[3];
-        cube.D[6] = cube.F[6];
-        cube.F[0] = t[0];
-        cube.F[3] = t[1];
-        cube.F[6] = t[2];
-      } else {
-        t = [cube.U[0], cube.U[3], cube.U[6]];
-        cube.U[0] = cube.F[0];
-        cube.U[3] = cube.F[3];
-        cube.U[6] = cube.F[6];
-        cube.F[0] = cube.D[0];
-        cube.F[3] = cube.D[3];
-        cube.F[6] = cube.D[6];
-        cube.D[0] = cube.B[8];
-        cube.D[3] = cube.B[5];
-        cube.D[6] = cube.B[2];
-        cube.B[8] = t[0];
-        cube.B[5] = t[1];
-        cube.B[2] = t[2];
-      }
-    } else if (face === "R") {
-      if (cw) {
-        t = [cube.U[2], cube.U[5], cube.U[8]];
-        cube.U[2] = cube.F[2];
-        cube.U[5] = cube.F[5];
-        cube.U[8] = cube.F[8];
-        cube.F[2] = cube.D[2];
-        cube.F[5] = cube.D[5];
-        cube.F[8] = cube.D[8];
-        cube.D[2] = cube.B[6];
-        cube.D[5] = cube.B[3];
-        cube.D[8] = cube.B[0];
-        cube.B[6] = t[0];
-        cube.B[3] = t[1];
-        cube.B[0] = t[2];
-      } else {
-        t = [cube.U[2], cube.U[5], cube.U[8]];
-        cube.U[2] = cube.B[6];
-        cube.U[5] = cube.B[3];
-        cube.U[8] = cube.B[0];
-        cube.B[6] = cube.D[8];
-        cube.B[3] = cube.D[5];
-        cube.B[0] = cube.D[2];
-        cube.D[8] = cube.F[8];
-        cube.D[5] = cube.F[5];
-        cube.D[2] = cube.F[2];
-        cube.F[8] = t[0];
-        cube.F[5] = t[1];
-        cube.F[2] = t[2];
-      }
-    }
-  }
-
-  function scrambleCube(n) {
-    cube = makeCube();
-    for (var i = 0; i < n; i++) {
-      rotateFace(FO[Math.floor(Math.random() * 6)], Math.random() > 0.5);
-    }
-    if (isSolved(cube)) scrambleCube(n);
-  }
-
-  // ---- Buttons ----
-  var buttons = [],
-    focusedButton = 0;
-
-  function buildButtons() {
-    buttons = [];
-    buttons.push({
-      id: "u",
-      lb: "U",
-      row: 0,
-      col: 0,
-      act: "rotate",
-      face: "U",
-      cw: true,
-    });
-    buttons.push({
-      id: "d",
-      lb: "D",
-      row: 0,
-      col: 1,
-      act: "rotate",
-      face: "D",
-      cw: true,
-    });
-    buttons.push({
-      id: "f",
-      lb: "F",
-      row: 0,
-      col: 2,
-      act: "rotate",
-      face: "F",
-      cw: true,
-    });
-    buttons.push({
-      id: "b",
-      lb: "B",
-      row: 0,
-      col: 3,
-      act: "rotate",
-      face: "B",
-      cw: true,
-    });
-    buttons.push({
-      id: "l",
-      lb: "L",
-      row: 0,
-      col: 4,
-      act: "rotate",
-      face: "L",
-      cw: true,
-    });
-    buttons.push({
-      id: "r",
-      lb: "R",
-      row: 0,
-      col: 5,
-      act: "rotate",
-      face: "R",
-      cw: true,
-    });
-    buttons.push({
-      id: "u2",
-      lb: "U\u2032",
-      row: 1,
-      col: 0,
-      act: "rotate",
-      face: "U",
-      cw: false,
-    });
-    buttons.push({
-      id: "d2",
-      lb: "D\u2032",
-      row: 1,
-      col: 1,
-      act: "rotate",
-      face: "D",
-      cw: false,
-    });
-    buttons.push({
-      id: "f2",
-      lb: "F\u2032",
-      row: 1,
-      col: 2,
-      act: "rotate",
-      face: "F",
-      cw: false,
-    });
-    buttons.push({
-      id: "b2",
-      lb: "B\u2032",
-      row: 1,
-      col: 3,
-      act: "rotate",
-      face: "B",
-      cw: false,
-    });
-    buttons.push({
-      id: "l2",
-      lb: "L\u2032",
-      row: 1,
-      col: 4,
-      act: "rotate",
-      face: "L",
-      cw: false,
-    });
-    buttons.push({
-      id: "r2",
-      lb: "R\u2032",
-      row: 1,
-      col: 5,
-      act: "rotate",
-      face: "R",
-      cw: false,
-    });
-    buttons.push({
-      id: "view",
-      lb: "\u25C4 VIEW \u25BA",
-      row: 2,
-      col: 2,
-      act: "view",
-    });
-  }
-
-  var BTN_W = 110,
-    BTN_H = 58,
-    BTN_GAP = 10;
-  function layoutButtons() {
-    if (!buttons.length) return;
-    var row0Y = 640,
-      rowGap = 72,
-      totalW6 = 6 * BTN_W + 5 * BTN_GAP,
-      startX6 = (BASE - totalW6) / 2;
-    var startX1 = (BASE - (BTN_W + 100)) / 2;
-    for (var i = 0; i < buttons.length; i++) {
-      var b = buttons[i];
-      if (b.row <= 1) {
-        b.x = startX6 + b.col * (BTN_W + BTN_GAP);
-        b.y = row0Y + b.row * (BTN_H + rowGap - BTN_GAP);
-      } else {
-        b.x = startX1 + 40;
-        b.y = row0Y + 2 * (BTN_H + rowGap - BTN_GAP);
-      }
-      b.w = BTN_W;
-      b.h = BTN_H;
-    }
-  }
-
-  // ---- Input ----
-  function activateButton(idx) {
-    var b = buttons[idx];
-    if (!b) return;
-    if (gameState === TITLE) {
-      startGame();
-      return;
-    }
-    if (gameState === WON) {
-      gameState = TITLE;
-      return;
-    }
-    if (b.act === "rotate") {
-      moves++;
-      rotateFace(b.face, b.cw);
-      if (isSolved(cube)) {
-        gameState = WON;
-        checkRecords();
-      }
-    } else if (b.act === "view") {
-      currentView = (currentView + 1) % VIEWS.length;
-    }
-  }
-
-  function navigateButton(dir) {
-    var b = buttons[focusedButton];
-    if (!b) return;
-    var best = -1,
-      bestD = 1 / 0;
-    for (var i = 0; i < buttons.length; i++) {
-      var btn = buttons[i];
-      if (
-        dir === "up" &&
-        btn.row < b.row &&
-        Math.abs(btn.col - b.col) < bestD
-      ) {
-        bestD = Math.abs(btn.col - b.col);
-        best = i;
-      }
-      if (
-        dir === "down" &&
-        btn.row > b.row &&
-        Math.abs(btn.col - b.col) < bestD
-      ) {
-        bestD = Math.abs(btn.col - b.col);
-        best = i;
-      }
-      if (
-        dir === "left" &&
-        btn.col < b.col &&
-        btn.row === b.row &&
-        b.col - btn.col < bestD
-      ) {
-        bestD = b.col - btn.col;
-        best = i;
-      }
-      if (
-        dir === "right" &&
-        btn.col > b.col &&
-        btn.row === b.row &&
-        btn.col - b.col < bestD
-      ) {
-        bestD = btn.col - b.col;
-        best = i;
-      }
-    }
-    if (best >= 0) focusedButton = best;
-  }
-
-  document.addEventListener("keydown", function (e) {
-    if (gameState === TITLE) {
-      startGame();
-      e.preventDefault();
-      return;
-    }
-    if (gameState === WON) {
-      gameState = TITLE;
-      e.preventDefault();
-      return;
-    }
-    switch (e.key) {
-      case "ArrowUp":
-        navigateButton("up");
-        e.preventDefault();
-        break;
-      case "ArrowDown":
-        navigateButton("down");
-        e.preventDefault();
-        break;
-      case "ArrowLeft":
-        navigateButton("left");
-        e.preventDefault();
-        break;
-      case "ArrowRight":
-        navigateButton("right");
-        e.preventDefault();
-        break;
-      case "Enter":
-      case " ":
-        activateButton(focusedButton);
-        e.preventDefault();
-        break;
-    }
-  });
-
-  function getButtonAt(mx, my) {
-    for (var i = 0; i < buttons.length; i++) {
-      var b = buttons[i];
-      if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h)
-        return i;
-    }
-    return -1;
-  }
-
-  function handlePointer(x, y) {
-    var rect = canvas.getBoundingClientRect();
-    // Convert viewport coordinates to canvas coordinates, adjusted for scale
-    var mx = (x - rect.left) / scale;
-    var my = (y - rect.top) / scale;
-
-    if (gameState === TITLE) {
-      startGame();
-      return;
-    }
-    if (gameState === WON) {
-      gameState = TITLE;
-      return;
-    }
-    var idx = getButtonAt(mx, my);
-    if (idx >= 0) {
-      focusedButton = idx;
-      activateButton(idx);
-    }
-  }
-
-  canvas.addEventListener("mousedown", function (e) {
-    handlePointer(e.clientX, e.clientY);
-  });
-  canvas.addEventListener(
-    "touchstart",
-    function (e) {
-      e.preventDefault();
-      var t = e.touches[0];
-      handlePointer(t.clientX, t.clientY);
-    },
-    { passive: false },
-  );
-
-  // ---- Game Flow ----
-  function startGame() {
-    gameState = PLAYING;
-    moves = 0;
-    startTime = Date.now();
-    elapsed = 0;
-    currentView = 0;
-    focusedButton = 0;
-    buildButtons();
-    layoutButtons();
-    scrambleCube(20);
-  }
-
-  // ---- Records ----
-  function getRecords() {
-    try {
-      var r = JSON.parse(localStorage.getItem("rubix_records"));
-      if (r) return r;
-    } catch (e) {}
-    return { bestTime: 1 / 0, bestMoves: 1 / 0 };
-  }
-  function checkRecords() {
-    var rec = getRecords();
-    brokeTime = elapsed < rec.bestTime;
-    brokeMoves = moves < rec.bestMoves;
-    if (brokeTime) rec.bestTime = elapsed;
-    if (brokeMoves) rec.bestMoves = moves;
-    localStorage.setItem("rubix_records", JSON.stringify(rec));
-  }
-
-  // ---- Rendering Helpers ----
-  function rr(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
-  }
-
-  function drawFace(cx, cy, sz, data) {
-    var cs = sz / 3,
-      g = 3;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.fillStyle = col(NVY);
-    ctx.fillRect(-g, -g, sz + g * 2, sz + g * 2);
-    for (var r = 0; r < 3; r++) {
-      for (var c = 0; c < 3; c++) {
-        var i = r * 3 + c,
-          px = c * cs,
-          py = r * cs;
-        ctx.fillStyle = col(BLK);
-        ctx.fillRect(px + g, py + g, cs - g * 2, cs - g * 2);
-        ctx.fillStyle = C[data[i]];
-        ctx.fillRect(px + g + 2, py + g + 2, cs - g * 2 - 4, cs - g * 2 - 4);
-        ctx.fillStyle = "rgba(255,255,255,0.15)";
-        ctx.fillRect(px + g + 2, py + g + 2, cs - g * 2 - 4, 4);
-        ctx.fillRect(px + g + 2, py + g + 2, 4, cs - g * 2 - 4);
-        ctx.fillStyle = "rgba(0,0,0,0.3)";
-        ctx.fillRect(px + g + 2, py + cs - g - 5, cs - g * 2 - 4, 4);
-        ctx.fillRect(px + cs - g - 5, py + g + 2, 4, cs - g * 2 - 4);
-      }
-    }
-    ctx.strokeStyle = col(LCA);
-    ctx.lineWidth = 2.5;
-    ctx.strokeRect(-1, -1, sz + 2, sz + 2);
-    ctx.restore();
-  }
-
-  function drawStars(t) {
-    for (var i = 0; i < stars.length; i++) {
-      var s = stars[i],
-        fl = 0.5 + 0.5 * Math.sin(t * s.sp + s.br * 100);
-      ctx.globalAlpha = fl * 0.7;
-      ctx.fillStyle = s.br > 0.7 ? col(LCA) : s.br > 0.4 ? col(CYA) : col(DBL);
-      ctx.fillRect(s.x, s.y, s.sz, s.sz);
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  function drawScanlines() {
-    ctx.fillStyle = "rgba(0,0,0,0.06)";
-    for (var y = 0; y < BASE; y += 4) ctx.fillRect(0, y, BASE, 2);
-  }
-
-  function fmtTime(ms) {
-    var m = Math.floor(ms / 60000),
-      s = Math.floor((ms % 60000) / 1000),
-      ms2 = Math.floor((ms % 1000) / 10);
-    return (
-      String(m).padStart(2, "0") +
-      ":" +
-      String(s).padStart(2, "0") +
-      "." +
-      String(ms2).padStart(2, "0")
-    );
-  }
-
-  function drawHUD() {
-    ctx.font = "bold 26px monospace";
-    ctx.textAlign = "left";
-    ctx.fillStyle = col(LCA);
-    ctx.fillText("MOVES", 30, 35);
-    ctx.font = "bold 38px monospace";
-    ctx.fillStyle = col(YLW);
-    ctx.fillText(String(moves), 30, 75);
-    ctx.font = "bold 26px monospace";
-    ctx.fillStyle = col(LCA);
-    ctx.fillText("TIME", 30, 118);
-    ctx.font = "bold 34px monospace";
-    ctx.fillStyle = col(LIM);
-    ctx.fillText(fmtTime(elapsed), 30, 155);
-    var rec = getRecords();
-    ctx.font = "16px monospace";
-    ctx.fillStyle = col(GRY);
-    ctx.textAlign = "right";
-    if (rec.bestTime < 1 / 0) {
-      var bt =
-        Math.floor(rec.bestTime / 60000) +
-        ":" +
-        String(Math.floor((rec.bestTime % 60000) / 1000)).padStart(2, "0");
-      ctx.fillText("BEST TIME: " + bt + "s", BASE - 30, 35);
-    }
-    if (rec.bestMoves < 1 / 0)
-      ctx.fillText("BEST MOVES: " + rec.bestMoves, BASE - 30, 58);
-    ctx.textAlign = "center";
-    ctx.font = "bold 18px monospace";
-    ctx.fillStyle = col(CYA);
-    var v = VIEWS[currentView];
-    ctx.fillText("VIEW: " + v.t + "-" + v.c + "-" + v.s, BASE / 2, 175);
-  }
-
-  function drawButtons(t) {
-    var pulse = 0.7 + 0.3 * Math.sin(t * 3);
-    for (var i = 0; i < buttons.length; i++) {
-      var b = buttons[i],
-        isF = i === focusedButton;
-      ctx.fillStyle = isF ? col(DBL) : col(NVY);
-      rr(b.x, b.y, b.w, b.h, 8);
-      ctx.fill();
-      ctx.strokeStyle = isF ? col(CYA) : col(DBL);
-      ctx.lineWidth = isF ? 3 : 1;
-      rr(b.x, b.y, b.w, b.h, 8);
-      ctx.stroke();
-      if (isF) {
-        ctx.save();
-        ctx.shadowColor = col(CYA);
-        ctx.shadowBlur = 14 * pulse;
-        ctx.strokeStyle = col(CYA);
-        ctx.lineWidth = 1.5;
-        rr(b.x, b.y, b.w, b.h, 8);
-        ctx.stroke();
-        ctx.restore();
-      }
-      ctx.font = "bold " + (b.row === 2 ? 18 : 22) + "px monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = isF ? col(LCA) : col(GRY);
-      ctx.fillText(b.lb, b.x + b.w / 2, b.y + b.h / 2);
-      ctx.textBaseline = "alphabetic";
-    }
-  }
-
-  function drawTitleScreen(t) {
-    ctx.fillStyle = col(BLK);
-    ctx.fillRect(0, 0, BASE, BASE);
-    drawStars(t);
-    drawScanlines();
-    ctx.strokeStyle = col(CYA);
-    ctx.lineWidth = 3;
-    ctx.strokeRect(30, 30, BASE - 60, BASE - 60);
-    ctx.strokeStyle = col(DBL);
-    ctx.lineWidth = 1;
-    ctx.strokeRect(38, 38, BASE - 76, BASE - 76);
-    var cl = 44;
-    ctx.strokeStyle = col(LCA);
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(30, 30 + cl);
-    ctx.lineTo(30, 30);
-    ctx.lineTo(30 + cl, 30);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(BASE - 30 - cl, 30);
-    ctx.lineTo(BASE - 30, 30);
-    ctx.lineTo(BASE - 30, 30 + cl);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(30, BASE - 30 - cl);
-    ctx.lineTo(30, BASE - 30);
-    ctx.lineTo(30 + cl, BASE - 30);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(BASE - 30 - cl, BASE - 30);
-    ctx.lineTo(BASE - 30, BASE - 30);
-    ctx.lineTo(BASE - 30, BASE - 30 - cl);
-    ctx.stroke();
-    var tp = 0.8 + 0.2 * Math.sin(t * 2);
-    ctx.save();
-    ctx.shadowColor = col(CYA);
-    ctx.shadowBlur = 36 * tp;
-    ctx.font = "bold 130px monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = col(LCA);
-    ctx.fillText("RUBIX", BASE / 2, 220);
-    ctx.restore();
-    ctx.font = "bold 24px monospace";
-    ctx.fillStyle = col(CYA);
-    ctx.fillText("CYBERPUNK SOLVER", BASE / 2, 290);
-    ctx.strokeStyle = col(DBL);
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(BASE / 2 - 180, 320);
-    ctx.lineTo(BASE / 2 + 180, 320);
-    ctx.stroke();
-    var mfs = 70,
-      pcx = BASE / 2,
-      pcy = 410,
-      pc = makeCube();
-    drawFace(pcx - mfs, pcy, mfs, pc["L"]);
-    drawFace(pcx, pcy - mfs, mfs, pc["U"]);
-    drawFace(pcx, pcy, mfs, pc["F"]);
-    drawFace(pcx + mfs, pcy, mfs, pc["R"]);
-    var pa = 0.5 + 0.5 * Math.sin(t * 3);
-    ctx.globalAlpha = pa;
-    ctx.font = "bold 26px monospace";
-    ctx.fillStyle = col(YLW);
-    ctx.fillText("[ PRESS ANY KEY / TAP TO START ]", BASE / 2, 530);
-    ctx.globalAlpha = 1;
-    ctx.font = "18px monospace";
-    ctx.fillStyle = col(GRY);
-    ctx.fillText(
-      "ARROW KEYS: NAVIGATE  |  ENTER/SPACE: ACTIVATE",
-      BASE / 2,
-      590,
-    );
-    ctx.fillText("CLICK/TAP BUTTONS DIRECTLY", BASE / 2, 620);
-    ctx.fillText(
-      "SOLVE THE CUBE IN FEWEST MOVES AND SHORTEST TIME",
-      BASE / 2,
-      650,
-    );
-    ctx.font = "16px monospace";
-    ctx.fillStyle = col(GRY);
-    var ly = 710;
-    ctx.fillText("FACE COLORS:", BASE / 2, ly);
-    var li = [
-      ["U:WHITE", WHT],
-      ["D:YELLOW", YLW],
-      ["F:RED", CRI],
-      ["B:ORANGE", ORG],
-      ["L:CYAN", CYA],
-      ["R:GREEN", LIM],
+/* ---------------- quaternion math ---------------- */
+const Q = {
+  mul(a, b) { // a * b
+    return [
+      a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+      a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+      a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+      a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]
     ];
-    var lx = BASE / 2 - 220;
-    for (var i = 0; i < li.length; i++) {
-      var lbl = li[i][0],
-        clr = li[i][1],
-        xx = lx + i * 85;
-      ctx.fillStyle = C[clr];
-      ctx.fillRect(xx, ly + 18, 14, 14);
-      ctx.fillStyle = col(GRY);
-      ctx.fillText(lbl, xx + 7, ly + 32);
+  },
+  inv(q) { return [q[0], -q[1], -q[2], -q[3]]; },
+  axisAngle(ax, ay, az, a) {
+    const s = Math.sin(a / 2), c = Math.cos(a / 2);
+    return [c, ax * s, ay * s, az * s];
+  },
+  rot(q, v) { // rotate vector v by unit quaternion q
+    const [w, x, y, z] = q;
+    const [px, py, pz] = v;
+    const tx = 2 * (y * pz - z * py);
+    const ty = 2 * (z * px - x * pz);
+    const tz = 2 * (x * py - y * px);
+    return [px + w * tx + (y * tz - z * ty),
+            py + w * ty + (z * tx - x * tz),
+            pz + w * tz + (x * ty - y * tx)];
+  }
+};
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+function norm(v) {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+const LIGHT = norm([0.45, 0.7, 0.6]);
+
+/* ---------------- cube state ---------------- */
+const cubies = []; // {x,y,z,q,colors}
+
+function resetCube() {
+  cubies.length = 0;
+  for (let x = -1; x <= 1; x++)
+    for (let y = -1; y <= 1; y++)
+      for (let z = -1; z <= 1; z++) {
+        const colors = {};
+        if (x === 1) colors['+x'] = FACE_COLORS['+x'];
+        if (x === -1) colors['-x'] = FACE_COLORS['-x'];
+        if (y === 1) colors['+y'] = FACE_COLORS['+y'];
+        if (y === -1) colors['-y'] = FACE_COLORS['-y'];
+        if (z === 1) colors['+z'] = FACE_COLORS['+z'];
+        if (z === -1) colors['-z'] = FACE_COLORS['-z'];
+        cubies.push({ x, y, z, q: [1, 0, 0, 0], colors });
+      }
+}
+
+/* clockwise 90° moves: vertical slices (L,M,R) about +X as seen from the
+ * right side; horizontal slices (U,M,D) about +Y as seen from above.
+ * Both are -90° by the right-hand rule. */
+function moveQuat(axis) {
+  return axis === 'x' ? Q.axisAngle(1, 0, 0, -Math.PI / 2)
+                      : Q.axisAngle(0, 1, 0, -Math.PI / 2);
+}
+
+function applyMove(axis, layer) { // commit instantly
+  const qa = moveQuat(axis);
+  for (const c of cubies) {
+    if (c[axis] !== layer) continue;
+    c.q = Q.mul(qa, c.q);
+    const p = Q.rot(qa, [c.x, c.y, c.z]);
+    c.x = Math.round(p[0]); c.y = Math.round(p[1]); c.z = Math.round(p[2]);
+  }
+}
+
+function axisKey(v) { // dominant axis -> '+x' style key
+  let ax = 0, m = Math.abs(v[0]);
+  if (Math.abs(v[1]) > m) { m = Math.abs(v[1]); ax = 1; }
+  if (Math.abs(v[2]) > m) { ax = 2; }
+  return (v[ax] > 0 ? '+' : '-') + 'xyz'[ax];
+}
+
+function isSolved() {
+  const dirs = [['x', 1], ['x', -1], ['y', 1], ['y', -1], ['z', 1], ['z', -1]];
+  for (const [ax, s] of dirs) {
+    let col = null;
+    for (const c of cubies) {
+      if (c[ax] !== s) continue;
+      const d = [0, 0, 0]; d['xyz'.indexOf(ax)] = s;
+      const key = axisKey(Q.rot(Q.inv(c.q), d));
+      const col2 = c.colors[key];
+      if (!col2) return false;
+      if (col === null) col = col2;
+      else if (col !== col2) return false;
     }
   }
+  return true;
+}
 
-  function drawVictoryScreen(t) {
-    ctx.fillStyle = col(BLK);
-    ctx.fillRect(0, 0, BASE, BASE);
-    drawStars(t);
-    drawScanlines();
-    ctx.strokeStyle = col(LIM);
-    ctx.lineWidth = 3;
-    ctx.strokeRect(30, 30, BASE - 60, BASE - 60);
-    ctx.strokeStyle = col(DGN);
-    ctx.lineWidth = 1;
-    ctx.strokeRect(38, 38, BASE - 76, BASE - 76);
-    var cl = 44;
-    ctx.strokeStyle = col(LIM);
-    ctx.lineWidth = 3;
+/* ---------------- game state ---------------- */
+let screen = 'title';          // 'title' | 'play' | 'end'
+let yaw = 0, pitch = 0;        // view rotation (radians)
+let moves = 0;
+let startTime = 0, timerOn = false, elapsed = 0;
+let anim = null;               // {axis, layer, start, dur}
+let pending = null;            // queued move (arcade chaining)
+let endReadyAt = 0;
+let endRecT = false, endRecM = false;
+
+let best = { time: null, moves: null };
+try {
+  const t = localStorage.getItem('rubix_best_time');
+  const m = localStorage.getItem('rubix_best_moves');
+  if (t !== null) best.time = +t;
+  if (m !== null) best.moves = +m;
+} catch (e) { /* storage unavailable */ }
+function saveBest() {
+  try {
+    localStorage.setItem('rubix_best_time', String(best.time));
+    localStorage.setItem('rubix_best_moves', String(best.moves));
+  } catch (e) { /* ignore */ }
+}
+
+function reshuffle() {
+  resetCube();
+  const all = [];
+  for (const ax of ['x', 'y']) for (const l of [-1, 0, 1]) all.push([ax, l]);
+  let prev = -1;
+  for (let i = 0; i < 28; i++) {
+    let j;
+    do { j = Math.floor(Math.random() * all.length); } while (j === prev);
+    prev = j;
+    applyMove(all[j][0], all[j][1]);
+  }
+  if (isSolved()) reshuffle();
+  moves = 0;
+  timerOn = false;
+  startTime = 0;
+  elapsed = 0;
+  yaw = 0;
+  pitch = 0;
+  anim = null;
+  pending = null;
+}
+
+function startGame() {
+  reshuffle();
+  focusIdx = 1; // start focused on M (vertical middle)
+  screen = 'play';
+}
+
+function doMove(axis, layer) {
+  if (anim) { pending = { axis, layer }; return; }
+  if (!timerOn) { timerOn = true; startTime = performance.now(); }
+  moves++;
+  anim = { axis, layer, start: performance.now(), dur: 170 };
+}
+
+function commitAnim(now) {
+  applyMove(anim.axis, anim.layer);
+  anim = null;
+  if (screen === 'play' && isSolved()) {
+    timerOn = false;
+    elapsed = performance.now() - startTime;
+    endRecT = (best.time === null || elapsed < best.time);
+    endRecM = (best.moves === null || moves < best.moves);
+    if (endRecT) { best.time = elapsed; saveBest(); }
+    if (endRecM) { best.moves = moves; saveBest(); }
+    endReadyAt = performance.now() + 600;
+    screen = 'end';
+  } else if (pending) {
+    const p = pending; pending = null;
+    doMove(p.axis, p.layer);
+  }
+}
+
+/* ---------------- layout / controls ---------------- */
+const C = {
+  vL:  { rect: { x: 306, y: 110, w: 56, h: 48 }, type: 'move', axis: 'x', layer: -1, label: 'L' },
+  vM:  { rect: { x: 372, y: 110, w: 56, h: 48 }, type: 'move', axis: 'x', layer: 0,  label: 'M' },
+  vR:  { rect: { x: 438, y: 110, w: 56, h: 48 }, type: 'move', axis: 'x', layer: 1,  label: 'R' },
+  hU:  { rect: { x: 692, y: 280, w: 64, h: 46 }, type: 'move', axis: 'y', layer: 1,  label: 'U' },
+  hM:  { rect: { x: 692, y: 389, w: 64, h: 46 }, type: 'move', axis: 'y', layer: 0,  label: 'M' },
+  hD:  { rect: { x: 692, y: 498, w: 64, h: 46 }, type: 'move', axis: 'y', layer: -1, label: 'D' },
+  vslide: { rect: { x: 52, y: 262, w: 52, h: 300 }, type: 'vslide' },
+  hslide: { rect: { x: 210, y: 618, w: 380, h: 48 }, type: 'hslide' },
+  reset:   { rect: { x: 140, y: 716, w: 170, h: 56 }, type: 'reset',   label: 'RESET VIEW' },
+  shuffle: { rect: { x: 330, y: 716, w: 140, h: 56 }, type: 'shuffle', label: 'SHUFFLE' },
+  quit:    { rect: { x: 500, y: 716, w: 170, h: 56 }, type: 'quit',    label: 'QUIT' }
+};
+const focusList = ['vL', 'vM', 'vR', 'vslide', 'hU', 'hM', 'hD', 'hslide', 'reset', 'shuffle', 'quit'];
+let focusIdx = 1;
+
+const ccx = (c) => c.rect.x + c.rect.w / 2;
+const ccy = (c) => c.rect.y + c.rect.h / 2;
+const focusKey = () => focusList[focusIdx];
+const isSlideKey = (k) => k === 'vslide' || k === 'hslide';
+
+function moveFocus(dx, dy) {
+  const cur = C[focusKey()];
+  let bestI = -1, bestScore = Infinity;
+  focusList.forEach((k, i) => {
+    if (k === focusKey()) return;
+    const t = C[k];
+    const vx = ccx(t) - ccx(cur);
+    const vy = ccy(t) - ccy(cur);
+    if (vx * dx + vy * dy < 24) return;        // must be roughly in direction
+    const off = Math.abs(vx * dy) + Math.abs(vy * dx); // cross-axis misalignment
+    const score = Math.hypot(vx, vy) + off * 2;
+    if (score < bestScore) { bestScore = score; bestI = i; }
+  });
+  if (bestI >= 0) focusIdx = bestI;
+}
+
+function setSliderDeg(key, deg) {
+  deg = ((deg % 360) + 360) % 360;
+  if (key === 'hslide') yaw = deg * Math.PI / 180;
+  else pitch = deg * Math.PI / 180;
+}
+const sliderDeg = (key) => ((key === 'hslide' ? yaw : pitch) * 180 / Math.PI + 360) % 360;
+
+function activate(key) {
+  if (key === 'vL' || key === 'vM' || key === 'vR' || key === 'hU' || key === 'hM' || key === 'hD') {
+    doMove(C[key].axis, C[key].layer);
+  } else if (key === 'reset') {
+    yaw = 0; pitch = 0;
+  } else if (key === 'shuffle') {
+    reshuffle();
+  } else if (key === 'quit') {
+    screen = 'title';
+  }
+}
+
+/* ---------------- 3D cube rendering ---------------- */
+const FACE_DEFS = [
+  { n: [ 1, 0, 0], c: '+x', v: [[ .5,-.5,-.5], [ .5,-.5, .5], [ .5, .5, .5], [ .5, .5,-.5]] },
+  { n: [-1, 0, 0], c: '-x', v: [[-.5,-.5,-.5], [-.5, .5,-.5], [-.5, .5, .5], [-.5,-.5, .5]] },
+  { n: [ 0, 1, 0], c: '+y', v: [[-.5, .5,-.5], [-.5, .5, .5], [ .5, .5, .5], [ .5, .5,-.5]] },
+  { n: [ 0,-1, 0], c: '-y', v: [[-.5,-.5,-.5], [ .5,-.5,-.5], [ .5,-.5, .5], [-.5,-.5, .5]] },
+  { n: [ 0, 0, 1], c: '+z', v: [[-.5,-.5, .5], [ .5,-.5, .5], [ .5, .5, .5], [-.5, .5, .5]] },
+  { n: [ 0, 0,-1], c: '-z', v: [[-.5,-.5,-.5], [-.5, .5,-.5], [ .5, .5,-.5], [ .5,-.5,-.5]] }
+];
+const ease = (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+function drawCube(cx, cy, scale, viewYaw, viewPitch, now) {
+  const qView = Q.mul(Q.axisAngle(1, 0, 0, viewPitch), Q.axisAngle(0, 1, 0, viewYaw));
+  const camD = 9;
+  const items = [];
+
+  for (const c of cubies) {
+    let px = c.x, py = c.y, pz = c.z, q = c.q;
+    if (anim && c[anim.axis] === anim.layer) {
+      const k = Math.min(1, (now - anim.start) / anim.dur);
+      const a = -ease(k) * Math.PI / 2;
+      const qa = anim.axis === 'x' ? Q.axisAngle(1, 0, 0, a) : Q.axisAngle(0, 1, 0, a);
+      const p = Q.rot(qa, [c.x, c.y, c.z]);
+      px = p[0]; py = p[1]; pz = p[2];
+      q = Q.mul(qa, c.q);
+    }
+    for (const f of FACE_DEFS) {
+      const n = Q.rot(q, f.n);
+      const nv = Q.rot(qView, n);
+      if (nv[2] > -0.02) continue;             // backface cull
+      const ctr = Q.rot(qView, [px, py, pz]);
+      const verts = f.v.map((v) => {
+        const l = Q.rot(q, v);
+        const pv = Q.rot(qView, [px + l[0], py + l[1], pz + l[2]]);
+        const s = camD / (camD - pv[2]);
+        return [cx + pv[0] * s * scale, cy - pv[1] * s * scale];
+      });
+      items.push({ z: ctr[2], verts, f, n, sticker: c.colors[f.c] || null });
+    }
+  }
+  items.sort((a, b) => a.z - b.z);             // far -> near (camera at +z)
+
+  for (const it of items) {
+    poly(it.verts, PANEL);                     // cubie body
+    if (it.sticker) {
+      const d = dot3(it.n, LIGHT);
+      const tiers = SHADES[it.sticker];
+      const col = d > 0.45 ? tiers[0] : d > 0.05 ? tiers[1] : tiers[2];
+      const c0 = [
+        (it.verts[0][0] + it.verts[1][0] + it.verts[2][0] + it.verts[3][0]) / 4,
+        (it.verts[0][1] + it.verts[1][1] + it.verts[2][1] + it.verts[3][1]) / 4
+      ];
+      const sv = it.verts.map((v) => [c0[0] + (v[0] - c0[0]) * 0.82, c0[1] + (v[1] - c0[1]) * 0.82]);
+      poly(sv, col);
+      poly(sv, col);                           // crisp sticker edge
+    }
+  }
+}
+
+function poly(pts, fill) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+/* ---------------- UI widgets ---------------- */
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawArrowIcon(x, y, r, color) { // small clockwise circular arrow
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(x, y, r, -2.4, 1.6);
+  ctx.stroke();
+  const a = 1.6;
+  const tx = x + Math.cos(a) * r, ty = y + Math.sin(a) * r;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(tx + Math.cos(a + 1.9) * 6, ty + Math.sin(a + 1.9) * 6);
+  ctx.lineTo(tx + Math.cos(a + 0.4) * 6, ty + Math.sin(a + 0.4) * 6);
+  ctx.lineTo(tx, ty);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawMoveButton(c, focused) {
+  const { x, y, w, h } = c.rect;
+  ctx.save();
+  if (focused) { ctx.shadowColor = GOLD; ctx.shadowBlur = 14; }
+  else { ctx.shadowColor = NEON; ctx.shadowBlur = 6; }
+  roundRect(x, y, w, h, 9);
+  ctx.fillStyle = PANEL;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = focused ? GOLD : BLUE;
+  ctx.lineWidth = focused ? 3 : 2;
+  ctx.stroke();
+  drawArrowIcon(x + 20, y + h / 2, 10, focused ? GOLD : NEON);
+  ctx.fillStyle = focused ? GOLD : ICE;
+  ctx.font = 'bold 22px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(c.label, x + w - 18, y + h / 2 + 1);
+  ctx.restore();
+}
+
+function drawActionButton(c, focused, danger) {
+  const { x, y, w, h } = c.rect;
+  ctx.save();
+  if (focused) { ctx.shadowColor = GOLD; ctx.shadowBlur = 14; }
+  else if (danger) { ctx.shadowColor = RED; ctx.shadowBlur = 8; }
+  else { ctx.shadowColor = NEON; ctx.shadowBlur = 6; }
+  roundRect(x, y, w, h, 9);
+  ctx.fillStyle = PANEL;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = focused ? GOLD : (danger ? RED : BLUE);
+  ctx.lineWidth = focused ? 3 : 2;
+  ctx.stroke();
+  ctx.fillStyle = focused ? GOLD : (danger ? PINK : ICE);
+  ctx.font = 'bold 17px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(c.label, x + w / 2, y + h / 2 + 1);
+  ctx.restore();
+}
+
+function drawSlider(key, focused) {
+  const r = C[key].rect;
+  const deg = sliderDeg(key);
+  const vertical = key === 'vslide';
+  const t = deg / 360;
+  ctx.save();
+  if (vertical) {
+    // track
+    ctx.strokeStyle = focused ? NEON : BLUE;
+    ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.moveTo(30, 30 + cl);
-    ctx.lineTo(30, 30);
-    ctx.lineTo(30 + cl, 30);
+    ctx.moveTo(ccx(C[key]), r.y + 8);
+    ctx.lineTo(ccx(C[key]), r.y + r.h - 8);
     ctx.stroke();
+    // ticks every 90°
+    ctx.strokeStyle = TEAL;
+    ctx.lineWidth = 2;
+    for (let d = 0; d < 360; d += 90) {
+      const ty = r.y + 8 + (d / 360) * (r.h - 16);
+      ctx.beginPath();
+      ctx.moveTo(ccx(C[key]) - 12, ty);
+      ctx.lineTo(ccx(C[key]) + 12, ty);
+      ctx.stroke();
+    }
+    // knob
+    const ky = r.y + 8 + t * (r.h - 16);
+    ctx.shadowColor = NEON;
+    ctx.shadowBlur = focused ? 14 : 8;
     ctx.beginPath();
-    ctx.moveTo(BASE - 30 - cl, 30);
-    ctx.lineTo(BASE - 30, 30);
-    ctx.lineTo(BASE - 30, 30 + cl);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(30, BASE - 30 - cl);
-    ctx.lineTo(30, BASE - 30);
-    ctx.lineTo(30 + cl, BASE - 30);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(BASE - 30 - cl, BASE - 30);
-    ctx.lineTo(BASE - 30, BASE - 30);
-    ctx.lineTo(BASE - 30, BASE - 30 - cl);
-    ctx.stroke();
-    var pulse = 0.8 + 0.2 * Math.sin(t * 2);
-    ctx.save();
-    ctx.shadowColor = col(LIM);
-    ctx.shadowBlur = 30 * pulse;
-    ctx.font = "bold 100px monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = col(LIM);
-    ctx.fillText("SOLVED!", BASE / 2, 150);
-    ctx.restore();
-    var bx = BASE / 2 - 200,
-      by = 210,
-      bw = 400,
-      bh = 220;
-    ctx.fillStyle = col(NVY);
-    rr(bx, by, bw, bh, 12);
+    ctx.arc(ccx(C[key]), ky, 13, 0, Math.PI * 2);
+    ctx.fillStyle = focused ? GOLD : NEON;
     ctx.fill();
-    ctx.strokeStyle = col(CYA);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = focused ? WHITE : ICE;
     ctx.lineWidth = 2;
-    rr(bx, by, bw, bh, 12);
     ctx.stroke();
-    ctx.font = "bold 30px monospace";
-    ctx.textAlign = "center";
-    ctx.fillStyle = col(LCA);
-    ctx.fillText("MOVES", BASE / 2, by + 50);
-    ctx.fillStyle = col(YLW);
-    ctx.font = "bold 52px monospace";
-    ctx.fillText(String(moves), BASE / 2, by + 95);
-    ctx.font = "bold 30px monospace";
-    ctx.fillStyle = col(LCA);
-    ctx.fillText("TIME", BASE / 2, by + 138);
-    ctx.fillStyle = col(LIM);
-    ctx.font = "bold 40px monospace";
-    ctx.fillText(fmtTime(elapsed), BASE / 2, by + 178);
-    var ry = 465;
-    ctx.font = "bold 24px monospace";
-    ctx.textAlign = "center";
-    if (brokeMoves) {
-      ctx.save();
-      ctx.shadowColor = col(YLW);
-      ctx.shadowBlur = 15;
-      ctx.fillStyle = col(YLW);
-      ctx.fillText("\u2605 NEW RECORD - FEWEST MOVES! \u2605", BASE / 2, ry);
-      ctx.restore();
-      ry += 38;
-    }
-    if (brokeTime) {
-      ctx.save();
-      ctx.shadowColor = col(PNK);
-      ctx.shadowBlur = 15;
-      ctx.fillStyle = col(PNK);
-      ctx.fillText("\u2605 NEW RECORD - FASTEST TIME! \u2605", BASE / 2, ry);
-      ctx.restore();
-      ry += 38;
-    }
-    var rec = getRecords();
-    ctx.font = "17px monospace";
-    ctx.fillStyle = col(GRY);
-    if (rec.bestTime < 1 / 0) {
-      var bt =
-        Math.floor(rec.bestTime / 60000) +
-        ":" +
-        String(Math.floor((rec.bestTime % 60000) / 1000)).padStart(2, "0");
-      ctx.fillText(
-        "Best Time: " + bt + "s  |  Best Moves: " + rec.bestMoves,
-        BASE / 2,
-        ry + 30,
-      );
-    }
-    var pa = 0.5 + 0.5 * Math.sin(t * 3);
-    ctx.globalAlpha = pa;
-    ctx.font = "bold 26px monospace";
-    ctx.fillStyle = col(YLW);
-    ctx.fillText("[ PRESS ANY KEY / TAP TO PLAY AGAIN ]", BASE / 2, 720);
-    ctx.globalAlpha = 1;
-  }
-
-  function drawGameScreen(t) {
-    ctx.fillStyle = col(BLK);
-    ctx.fillRect(0, 0, BASE, BASE);
-    drawStars(t);
-    drawScanlines();
-    drawHUD();
-    ctx.strokeStyle = col(DBL);
-    ctx.lineWidth = 2;
+    // value
+    ctx.fillStyle = ICE;
+    ctx.font = 'bold 15px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(Math.round(deg) + '°', r.x + r.w / 2, r.y + r.h + 22);
+  } else {
+    ctx.strokeStyle = focused ? NEON : BLUE;
+    ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.moveTo(30, 170);
-    ctx.lineTo(BASE - 30, 170);
+    ctx.moveTo(r.x + 8, ccy(C[key]));
+    ctx.lineTo(r.x + r.w - 8, ccy(C[key]));
     ctx.stroke();
-    ctx.font = "bold 22px monospace";
-    ctx.textAlign = "center";
-    ctx.fillStyle = col(CYA);
-    ctx.fillText("R U B I X", BASE / 2, 158);
-    var view = VIEWS[currentView],
-      fsz = 130,
-      fg = 10,
-      cx = BASE / 2,
-      cy = 330;
-    drawFace(cx, cy, fsz, cube[view.c]);
-    drawFace(cx, cy - fsz - fg, fsz, cube[view.t]);
-    var sx = view.dir === "right" ? cx + fsz + fg : cx - fsz - fg;
-    drawFace(sx, cy, fsz, cube[view.s]);
-    ctx.font = "bold 15px monospace";
-    ctx.textAlign = "center";
-    ctx.fillStyle = col(LCA);
-    ctx.fillText(FN[view.t], cx, cy - fsz - fg - 12);
-    ctx.fillText(FN[view.c], cx, cy + fsz + 22);
-    ctx.fillText(
-      FN[view.s],
-      view.dir === "right" ? cx + fsz + fg + fsz / 2 : cx - fsz - fg + fsz / 2,
-      cy + fsz + 22,
-    );
-    drawButtons(t);
-  }
-
-  // ---- Main Loop ----
-  var lastTime = 0;
-  function gameLoop(ts) {
-    var t = ts / 1000;
-    if (gameState === PLAYING) elapsed = Date.now() - startTime;
-    ctx.clearRect(0, 0, BASE, BASE);
-    switch (gameState) {
-      case TITLE:
-        drawTitleScreen(t);
-        break;
-      case PLAYING:
-        drawGameScreen(t);
-        break;
-      case WON:
-        drawVictoryScreen(t);
-        break;
+    ctx.strokeStyle = TEAL;
+    ctx.lineWidth = 2;
+    for (let d = 0; d < 360; d += 90) {
+      const tx = r.x + 8 + (d / 360) * (r.w - 16);
+      ctx.beginPath();
+      ctx.moveTo(tx, ccy(C[key]) - 12);
+      ctx.lineTo(tx, ccy(C[key]) + 12);
+      ctx.stroke();
     }
-    requestAnimationFrame(gameLoop);
+    const kx = r.x + 8 + t * (r.w - 16);
+    ctx.shadowColor = NEON;
+    ctx.shadowBlur = focused ? 14 : 8;
+    ctx.beginPath();
+    ctx.arc(kx, ccy(C[key]), 13, 0, Math.PI * 2);
+    ctx.fillStyle = focused ? GOLD : NEON;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = focused ? WHITE : ICE;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = ICE;
+    ctx.font = 'bold 15px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(Math.round(deg) + '°', r.x + r.w + 34, ccy(C[key]));
   }
+  if (focused) {
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = 2;
+    roundRect(r.x - 4, r.y - 4, r.w + 8, r.h + 8, 10);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
-  buildButtons();
-  layoutButtons();
-  requestAnimationFrame(gameLoop);
-})();
+/* ---------------- background / chrome ---------------- */
+function drawBackground() {
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, LOGICAL, LOGICAL);
+  // faint tech grid
+  ctx.strokeStyle = PANEL;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 40; i < LOGICAL; i += 40) {
+    ctx.moveTo(i, 0); ctx.lineTo(i, LOGICAL);
+    ctx.moveTo(0, i); ctx.lineTo(LOGICAL, i);
+  }
+  ctx.stroke();
+  // frame
+  ctx.strokeStyle = BLUE;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(10, 10, LOGICAL - 20, LOGICAL - 20);
+  ctx.strokeStyle = NEON;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(16, 16, LOGICAL - 32, LOGICAL - 32);
+}
+
+function drawHUD(now) {
+  const t = timerOn ? performance.now() - startTime : elapsed;
+  ctx.save();
+  ctx.textBaseline = 'middle';
+  // logo
+  ctx.shadowColor = NEON;
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = GOLD;
+  ctx.font = 'bold 30px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('RUBIX', 30, 46);
+  ctx.shadowBlur = 0;
+  // time
+  ctx.fillStyle = DIM;
+  ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('TIME', 300, 30);
+  ctx.fillStyle = WHITE;
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText(fmtTime(t), 300, 54);
+  // moves
+  ctx.fillStyle = DIM;
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText('MOVES', 470, 30);
+  ctx.fillStyle = LIME;
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText(String(moves).padStart(3, '0'), 470, 54);
+  // best
+  ctx.textAlign = 'right';
+  ctx.fillStyle = DIM;
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText('BEST', 770, 30);
+  ctx.fillStyle = ICE;
+  ctx.font = 'bold 15px monospace';
+  ctx.fillText(
+    (best.time === null ? '--:--.-' : fmtTime(best.time)) + '  /  ' +
+    (best.moves === null ? '---' : best.moves) + ' mv', 770, 52);
+  ctx.restore();
+}
+
+function fmtTime(ms) {
+  const t = Math.max(0, ms);
+  const m = Math.floor(t / 60000);
+  const s = Math.floor((t % 60000) / 1000);
+  const c = Math.floor((t % 1000) / 10);
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + '.' + String(c).padStart(2, '0');
+}
+
+function blinkOn(now, ms = 500) {
+  return Math.floor(now / ms) % 2 === 0;
+}
+
+/* ---------------- screens ---------------- */
+function drawTitle(now) {
+  drawBackground();
+  // decorative spinning cube
+  const a = now * 0.00045;
+  drawCube(400, 340, 62, a, 0.5, now);
+  // holo ring
+  ctx.strokeStyle = BLUE;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(400, 560, 170, 26, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // logo
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = NEON;
+  ctx.shadowBlur = 26;
+  ctx.fillStyle = WHITE;
+  ctx.font = 'bold 88px monospace';
+  ctx.fillText('RUBIX', 400, 680);
+  ctx.shadowColor = NEON;
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = NEON;
+  ctx.font = 'bold 88px monospace';
+  ctx.fillText('RUBIX', 400, 680);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = ICE;
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText('A R C A D I C   C U B E   S O L V E R', 400, 732);
+  if (blinkOn(now)) {
+    ctx.fillStyle = GOLD;
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText('TAP OR PRESS ANY KEY TO START', 400, 620);
+  }
+  ctx.fillStyle = DIM;
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText('ARROW KEYS NAVIGATE  ·  ENTER / SPACE CONFIRM  ·  SLIDERS ROTATE VIEW', 400, 764);
+  if (best.time !== null) {
+    ctx.fillStyle = LIME;
+    ctx.fillText('RECORD  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', 400, 706);
+  }
+  ctx.restore();
+}
+
+function drawPlay(now) {
+  drawBackground();
+  drawHUD(now);
+  // section labels
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = DIM;
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('VERTICAL SLICES · CLOCKWISE', 400, 96);
+  ctx.save();
+  ctx.translate(778, 412);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('HORIZONTAL SLICES', 0, 0);
+  ctx.restore();
+  ctx.fillText('VERTICAL VIEW', C.vslide.rect.x + C.vslide.rect.w / 2, 244);
+  ctx.fillText('HORIZONTAL VIEW', 400, 604);
+  ctx.restore();
+  // holo ring under cube
+  ctx.strokeStyle = BLUE;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(400, 566, 160, 24, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // the cube
+  drawCube(400, 412, 58, yaw, pitch, now);
+  // controls
+  const fk = focusKey();
+  for (const k of ['vL', 'vM', 'vR', 'hU', 'hM', 'hD']) drawMoveButton(C[k], k === fk);
+  for (const k of ['reset', 'shuffle', 'quit'])
+    drawActionButton(C[k], k === fk, k === 'quit');
+  drawSlider('vslide', fk === 'vslide');
+  drawSlider('hslide', fk === 'hslide');
+}
+
+function drawEnd(now) {
+  drawBackground();
+  drawCube(400, 330, 54, -Math.PI / 4, -0.35, now);
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = LIME;
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = LIME;
+  ctx.font = 'bold 46px monospace';
+  ctx.fillText('CUBE SOLVED', 400, 520);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = DIM;
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('TIME', 260, 572);
+  ctx.fillText('MOVES', 540, 572);
+  ctx.fillStyle = WHITE;
+  ctx.font = 'bold 34px monospace';
+  ctx.fillText(fmtTime(elapsed), 260, 602);
+  ctx.fillStyle = LIME;
+  ctx.fillText(String(moves), 540, 602);
+  let yy = 648;
+  if (endRecT || endRecM) {
+    ctx.shadowColor = GOLD;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = GOLD;
+    ctx.font = 'bold 24px monospace';
+    if (endRecT && endRecM) ctx.fillText('★ DOUBLE NEW RECORD ★', 400, yy);
+    else if (endRecT) ctx.fillText('★ NEW RECORD — TIME ★', 400, yy);
+    else ctx.fillText('★ NEW RECORD — MOVES ★', 400, yy);
+    ctx.shadowBlur = 0;
+    yy += 34;
+  }
+  if (blinkOn(now)) {
+    ctx.fillStyle = ICE;
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('PRESS ENTER OR TAP TO PLAY AGAIN', 400, 740);
+  }
+  ctx.fillStyle = DIM;
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('BEST  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', 400, 770);
+  ctx.restore();
+}
+
+/* ---------------- input ---------------- */
+function toLogical(e) {
+  const r = canvas.getBoundingClientRect();
+  return [
+    (e.clientX - r.left) / r.width * LOGICAL,
+    (e.clientY - r.top) / r.height * LOGICAL
+  ];
+}
+function inRect(p, r, pad = 10) {
+  return p[0] >= r.x - pad && p[0] <= r.x + r.w + pad &&
+         p[1] >= r.y - pad && p[1] <= r.y + r.h + pad;
+}
+function applySliderAt(key, p) {
+  const r = C[key].rect;
+  let t;
+  if (key === 'hslide') t = (p[0] - (r.x + 8)) / (r.w - 16);
+  else t = (p[1] - (r.y + 8)) / (r.h - 16);
+  t = Math.max(0, Math.min(1, t));
+  setSliderDeg(key, t * 359.999);
+}
+
+let dragKey = null;
+canvas.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  const now = performance.now();
+  if (screen === 'title') { startGame(); return; }
+  if (screen === 'end') { if (now >= endReadyAt) startGame(); return; }
+  const p = toLogical(e);
+  for (const k of ['vslide', 'hslide']) {
+    if (inRect(p, C[k].rect, 6)) {
+      focusIdx = focusList.indexOf(k);
+      applySliderAt(k, p);
+      dragKey = k;
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+  }
+  for (const k of focusList) {
+    if (isSlideKey(k)) continue;
+    if (inRect(p, C[k].rect)) {
+      focusIdx = focusList.indexOf(k);
+      activate(k);
+      return;
+    }
+  }
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (dragKey) applySliderAt(dragKey, toLogical(e));
+});
+canvas.addEventListener('pointerup', () => { dragKey = null; });
+canvas.addEventListener('pointercancel', () => { dragKey = null; });
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+window.addEventListener('keydown', (e) => {
+  const k = e.key;
+  if (screen === 'title') { startGame(); return; }
+  if (screen === 'end') {
+    if (performance.now() >= endReadyAt) startGame();
+    return;
+  }
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Enter'].includes(k))
+    e.preventDefault();
+  const fk = focusKey();
+  switch (k) {
+    case 'ArrowUp':
+      if (fk === 'vslide') setSliderDeg('vslide', sliderDeg('vslide') - 15);
+      else moveFocus(0, -1);
+      break;
+    case 'ArrowDown':
+      if (fk === 'vslide') setSliderDeg('vslide', sliderDeg('vslide') + 15);
+      else moveFocus(0, 1);
+      break;
+    case 'ArrowLeft':
+      if (fk === 'hslide') setSliderDeg('hslide', sliderDeg('hslide') - 15);
+      else moveFocus(-1, 0);
+      break;
+    case 'ArrowRight':
+      if (fk === 'hslide') setSliderDeg('hslide', sliderDeg('hslide') + 15);
+      else moveFocus(1, 0);
+      break;
+    case 'Enter':
+    case ' ':
+      if (!e.repeat) activate(fk);
+      break;
+  }
+});
+
+/* ---------------- main loop ---------------- */
+function frame(now) {
+  if (anim && now - anim.start >= anim.dur) commitAnim(now);
+  ctx.setTransform(unit, 0, 0, unit, 0, 0);
+  if (screen === 'title') drawTitle(now);
+  else if (screen === 'play') drawPlay(now);
+  else drawEnd(now);
+  requestAnimationFrame(frame);
+}
+resetCube();
+frame(performance.now());            // draws immediately, then chains rAF

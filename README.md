@@ -1,61 +1,61 @@
-# Rubix — Cyberpunk 2D Rubik's Cube Solver
+# RUBIX
 
-A retro-futuristic arcade puzzle game built with vanilla HTML5/JavaScript. **Rubix** is a 2D Rubik's cube solver game where the player can track the moves and time in-game and have it saved to local storage. 
+**Rubix** is an arcade-style Rubik's cube solver game with a cyberpunk / sci-fi theme.
+Built with pure HTML5 Canvas + vanilla JavaScript — no external libraries, no assets.
+The entire game is rendered in the **Arne16** 16-color palette.
 
-## Features
+## Run it
 
-- **2D cube view** — Displays three faces of the cube at a time in a cross layout
-- **Full rotation controls** — Clockwise and counter-clockwise rotations for all 6 faces
-- **View switching** — Rotate the camera to see different angles of the cube
-- **Cyberpunk theme** — Neon glow effects, dark backgrounds, sci-fi typography
-- **Dual input support**
-  - **Mouse/Touch** — Click or tap buttons directly
-  - **Keyboard** — Arrow keys to navigate controls, Enter/Space to activate
-- **Move & time tracking** — Tracks both move count and elapsed time
-- **Record keeping** — Saves best times and fewest moves in localStorage
-- **Responsive design** — Square canvas scales to maximum browser fit
+Open `index.html` directly in any modern browser, or serve the folder:
+
+```bash
+python3 -m http.server 8000
+# then visit http://localhost:8000
+```
+
+Works on desktop and mobile.
+
+## How to play
+
+1. Tap / click anywhere, or press any key, on the title screen to start.
+2. The cube is shuffled. Rotate the slices using the buttons:
+   - **Top buttons (L / M / R)** — rotate the left, middle, or right **vertical** slice clockwise.
+   - **Right buttons (U / M / D)** — rotate the top, middle, or bottom **horizontal** slice clockwise.
+   - (No counter-clockwise moves — three clockwise turns equal one counter-clockwise turn.)
+3. Inspect the cube with the sliders:
+   - **Left slider** — vertical view rotation, full 360°.
+   - **Bottom slider** — horizontal view rotation, full 360°.
+4. Bottom buttons:
+   - **RESET VIEW** — snap the view back to the front face (0°, 0°).
+   - **SHUFFLE** — new scramble; timer and move counter reset to zero.
+   - **QUIT** — abandon the run (no score) and return to the menu.
+5. The timer starts on your first move. Solve all six faces to finish —
+   you'll see your moves, your time, and any new records (records persist in `localStorage`).
 
 ## Controls
 
-### Keyboard
+| Action | Mouse / touch | Keyboard |
+|---|---|---|
+| Start / play again | Tap | Any key |
+| Rotate a slice | Tap its button | Arrows to focus a button, **Enter / Space** to press |
+| Rotate view | Tap or drag the sliders | Focus a slider (arrows), then **←/→** adjusts the bottom slider, **↑/↓** adjusts the left slider (15° steps) |
+| Reset view / shuffle / quit | Tap the button | Focus with arrows, **Enter / Space** |
 
-| Key | Action |
-|-----|--------|
-| `Arrow Up` / `Arrow Down` | Navigate between controls vertically |
-| `Arrow Left` / `Arrow Right` | Navigate between controls horizontally |
-| `Enter` / `Space` | Activate selected button |
-| Any key | Start game from title screen |
+## Files
 
-### Mouse / Touch
+| File | Purpose |
+|---|---|
+| `index.html` | Page shell, centered square canvas, mobile viewport meta |
+| `game.js` | Entire game: 3D math, cube logic, rendering, input, screens |
+| `README.md` | This file |
 
-- **Click/Tap** any button to activate it
-- Buttons are arranged in rows for easy access
+## Tech notes
 
-### Game Buttons
-
-- **U / U'** — Rotate Up face clockwise / counter-clockwise
-- **D / D'** — Rotate Down face clockwise / counter-clockwise
-- **F / F'** — Rotate Front face clockwise / counter-clockwise
-- **B / B'** — Rotate Back face clockwise / counter-clockwise
-- **L / L'** — Rotate Left face clockwise / counter-clockwise
-- **R / R'** — Rotate Right face clockwise / counter-clockwise
-- **◀ View ▶** — Cycle through different camera angles
-
-## Game Flow
-
-1. **Title Screen** — Press any key or click/tap to begin
-2. **Gameplay** — Solve the scrambled cube using rotation controls
-3. **Victory Screen** — See your move count, time, and any records broken
-4. **Play Again** — Return to gameplay with a fresh scramble
-
-## Face Color Mapping
-
-| Face | Color |
-|------|-------|
-| Up | White |
-| Down | Yellow |
-| Front | Crimson |
-| Back | Orange |
-| Left | Cyan |
-| Right | Lime |
-
+- **3D engine**: hand-rolled quaternion math, per-cubie transforms, perspective
+  projection, backface culling and painter's-algorithm depth sorting on a 2D canvas.
+- **Square canvas**: 800×800 logical units, scaled to `min(vw, vh)` with
+  `devicePixelRatio` backing store for crisp, high-quality graphics.
+- **Palette (Arne16)**: `#000000 #9D9D9D #FFFFFF #BE2633 #E06F8B #493C2B #A46422
+  #EB8931 #F7E26B #2F484E #44891A #A3CE27 #1B2632 #005784 #31A2F2 #B2DCEF` —
+  these 16 hex codes are the only colors used anywhere (shading picks the
+  nearest palette entry so every rendered fill stays inside the palette).
