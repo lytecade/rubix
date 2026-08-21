@@ -334,7 +334,7 @@ function drawCube(cx, cy, scale, viewYaw, viewPitch, now) {
     for (const f of FACE_DEFS) {
       const n = Q.rot(q, f.n);
       const nv = Q.rot(qView, n);
-      if (nv[2] > -0.02) continue;             // backface cull
+      if (nv[2] < 0.02) continue;              // backface cull: keep faces pointing at camera (+z)
       const ctr = Q.rot(qView, [px, py, pz]);
       const verts = f.v.map((v) => {
         const l = Q.rot(q, v);
