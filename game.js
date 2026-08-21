@@ -28,22 +28,7 @@ const BLUE   = '#005784';
 const NEON   = '#31A2F2';
 const ICE    = '#B2DCEF';
 
-/* nearest-palette color to (color * factor) — keeps shading in-palette */
-function hexRGB(h) {
-  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
-}
-function nearestPalette(hex, factor) {
-  const [r, g, b] = hexRGB(hex);
-  let best = ARNE[0], bd = Infinity;
-  for (const c of ARNE) {
-    const [R, G, B] = hexRGB(c);
-    const d = (R - r * factor) ** 2 + (G - g * factor) ** 2 + (B - b * factor) ** 2;
-    if (d < bd) { bd = d; best = c; }
-  }
-  return best;
-}
-
-/* Cube face colors (bright tier) */
+/* Cube face colors */
 const FACE_COLORS = {
   '+x': RED,    // right
   '-x': ORANGE, // left
@@ -52,12 +37,6 @@ const FACE_COLORS = {
   '+z': NEON,   // front
   '-z': GRN     // back
 };
-/* shading tiers per base color: [bright, mid, dark] */
-const SHADES = {};
-for (const k in FACE_COLORS) {
-  const base = FACE_COLORS[k];
-  SHADES[base] = [base, nearestPalette(base, 0.62), nearestPalette(base, 0.34)];
-}
 
 /* ---------------- canvas / scaling ---------------- */
 const canvas = document.getElementById('game');
@@ -103,12 +82,10 @@ const Q = {
             pz + w * tz + (x * ty - y * tx)];
   }
 };
-const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-function norm(v) {
+const norm = (v) => {
   const l = Math.hypot(v[0], v[1], v[2]) || 1;
   return [v[0] / l, v[1] / l, v[2] / l];
-}
-const LIGHT = norm([0.45, 0.7, 0.6]);
+};
 
 /* ---------------- cube state ---------------- */
 const cubies = []; // {x,y,z,q,colors}
@@ -334,7 +311,7 @@ function drawCube(cx, cy, scale, viewYaw, viewPitch, now) {
     for (const f of FACE_DEFS) {
       const n = Q.rot(q, f.n);
       const nv = Q.rot(qView, n);
-      if (nv[2] < 0.02) continue;              // backface cull: keep faces pointing at camera (+z)
+      if (nv[2] < 0) continue;             // backface cull
       const ctr = Q.rot(qView, [px, py, pz]);
       const verts = f.v.map((v) => {
         const l = Q.rot(q, v);
@@ -350,9 +327,7 @@ function drawCube(cx, cy, scale, viewYaw, viewPitch, now) {
   for (const it of items) {
     poly(it.verts, PANEL);                     // cubie body
     if (it.sticker) {
-      const d = dot3(it.n, LIGHT);
-      const tiers = SHADES[it.sticker];
-      const col = d > 0.45 ? tiers[0] : d > 0.05 ? tiers[1] : tiers[2];
+      const col = it.sticker;
       const c0 = [
         (it.verts[0][0] + it.verts[1][0] + it.verts[2][0] + it.verts[3][0]) / 4,
         (it.verts[0][1] + it.verts[1][1] + it.verts[2][1] + it.verts[3][1]) / 4
