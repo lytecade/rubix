@@ -4,6 +4,13 @@
  *  Arcade cyberpunk Rubik's cube solver.
  *  HTML5 canvas + vanilla JS. No external libraries.
  *  Colors: Arne16 palette ONLY.
+ *
+ *  Responsive graphics:
+ *   - canvas fills the whole viewport in any orientation
+ *   - device detection: touch / coarse-pointer phones get their
+ *     own portrait & landscape layouts with touch-sized controls
+ *   - devicePixelRatio-aware backing store for crisp graphics
+ *   - safe-area (notch / home-bar) aware placement
  * ============================================================ */
 
 /* ---------------- Arne16 palette ---------------- */
@@ -38,23 +45,64 @@ const FACE_COLORS = {
   '-z': GRN     // back
 };
 
+/* ---------------- device detection ---------------- */
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const isCoarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+/* glow (shadowBlur) is expensive on mobile GPUs — dial it down there */
+const GLOW = isCoarse ? 0.5 : 1;
+
 /* ---------------- canvas / scaling ---------------- */
 const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const LOGICAL = 800;          // 800x800 logical square
-let unit = 1;
+const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+let VW = 0, VH = 0, DPR = 1;          // viewport in CSS px + backing scale
+let portrait = false;
+let insets = { l: 0, r: 0, t: 0, b: 0 }; // safe-area insets (notch etc.)
+let lastOrientation = null;
+
+/* read CSS env(safe-area-inset-*) values via hidden probe elements */
+function readInsets() {
+  try {
+    const measure = (side, horiz) => {
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;margin:0;padding:0;';
+      d.style[horiz ? 'width' : 'height'] = 'env(safe-area-inset-' + side + ')';
+      document.body.appendChild(d);
+      const v = horiz ? d.offsetWidth : d.offsetHeight;
+      document.body.removeChild(d);
+      return clamp(v || 0, 0, 80);
+    };
+    insets.l = measure('left', true);
+    insets.r = measure('right', true);
+    insets.t = measure('top', false);
+    insets.b = measure('bottom', false);
+  } catch (e) { insets = { l: 0, r: 0, t: 0, b: 0 }; }
+}
 
 function resize() {
-  const s = Math.max(200, Math.min(window.innerWidth, window.innerHeight));
-  const dpr = window.devicePixelRatio || 1;
-  canvas.style.width = s + 'px';
-  canvas.style.height = s + 'px';
-  canvas.width = Math.round(s * dpr);
-  canvas.height = Math.round(s * dpr);
-  unit = canvas.width / LOGICAL;
+  const vv = window.visualViewport;
+  const w = vv ? vv.width : window.innerWidth;
+  const h = vv ? vv.height : window.innerHeight;
+  VW = Math.max(200, Math.round(w));
+  VH = Math.max(200, Math.round(h));
+  DPR = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.style.width = VW + 'px';
+  canvas.style.height = VH + 'px';
+  canvas.width = Math.round(VW * DPR);
+  canvas.height = Math.round(VH * DPR);
+  const o = VH > VW ? 'portrait' : 'landscape';
+  if (o !== lastOrientation) { readInsets(); lastOrientation = o; }
+  computeLayout();
 }
 window.addEventListener('resize', resize);
-resize();
+window.addEventListener('orientationchange', () => setTimeout(resize, 80));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+try {
+  const mq = window.matchMedia('(orientation: portrait)');
+  const onOr = () => setTimeout(resize, 80);
+  if (mq.addEventListener) mq.addEventListener('change', onOr);
+  else if (mq.addListener) mq.addListener(onOr);
+} catch (e) { /* ignore */ }
 
 /* ---------------- quaternion math ---------------- */
 const Q = {
@@ -225,19 +273,21 @@ function commitAnim(now) {
   }
 }
 
-/* ---------------- layout / controls ---------------- */
+/* ---------------- layout / controls ----------------
+ * Control types / actions are fixed; their rects are recomputed by
+ * computeLayout() for the current viewport, orientation & device class. */
 const C = {
-  vL:  { rect: { x: 306, y: 110, w: 56, h: 48 }, type: 'move', axis: 'x', layer: -1, label: 'L' },
-  vM:  { rect: { x: 372, y: 110, w: 56, h: 48 }, type: 'move', axis: 'x', layer: 0,  label: 'M' },
-  vR:  { rect: { x: 438, y: 110, w: 56, h: 48 }, type: 'move', axis: 'x', layer: 1,  label: 'R' },
-  hU:  { rect: { x: 692, y: 280, w: 64, h: 46 }, type: 'move', axis: 'y', layer: 1,  label: 'U' },
-  hM:  { rect: { x: 692, y: 389, w: 64, h: 46 }, type: 'move', axis: 'y', layer: 0,  label: 'M' },
-  hD:  { rect: { x: 692, y: 498, w: 64, h: 46 }, type: 'move', axis: 'y', layer: -1, label: 'D' },
-  vslide: { rect: { x: 52, y: 262, w: 52, h: 300 }, type: 'vslide' },
-  hslide: { rect: { x: 210, y: 618, w: 380, h: 48 }, type: 'hslide' },
-  reset:   { rect: { x: 140, y: 716, w: 170, h: 56 }, type: 'reset',   label: 'RESET VIEW' },
-  shuffle: { rect: { x: 330, y: 716, w: 140, h: 56 }, type: 'shuffle', label: 'SHUFFLE' },
-  quit:    { rect: { x: 500, y: 716, w: 170, h: 56 }, type: 'quit',    label: 'QUIT' }
+  vL:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'x', layer: -1, label: 'L' },
+  vM:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'x', layer: 0,  label: 'M' },
+  vR:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'x', layer: 1,  label: 'R' },
+  hU:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'y', layer: 1,  label: 'U' },
+  hM:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'y', layer: 0,  label: 'M' },
+  hD:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'y', layer: -1, label: 'D' },
+  vslide: { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'vslide' },
+  hslide: { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'hslide' },
+  reset:   { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'reset',   label: 'RESET VIEW' },
+  shuffle: { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'shuffle', label: 'SHUFFLE' },
+  quit:    { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'quit',    label: 'QUIT' }
 };
 const focusList = ['vL', 'vM', 'vR', 'vslide', 'hU', 'hM', 'hD', 'hslide', 'reset', 'shuffle', 'quit'];
 let focusIdx = 1;
@@ -246,6 +296,184 @@ const ccx = (c) => c.rect.x + c.rect.w / 2;
 const ccy = (c) => c.rect.y + c.rect.h / 2;
 const focusKey = () => focusList[focusIdx];
 const isSlideKey = (k) => k === 'vslide' || k === 'hslide';
+
+/* computed layout, refreshed on every resize / orientation change */
+const L = {
+  u: 1,                 // global UI size multiplier
+  hudH: 60,
+  touchPad: 12,         // hit-test padding around controls
+  knob: 13,             // slider knob radius
+  cube: { cx: 0, cy: 0, scale: 50 },
+  ring: { cx: 0, cy: 0, rx: 100, ry: 20 },
+  fonts: {},
+  labels: {}
+};
+
+function setRect(c, x, y, w, h) {
+  c.rect.x = x; c.rect.y = y; c.rect.w = Math.max(20, w); c.rect.h = Math.max(20, h);
+}
+
+function computeLayout() {
+  portrait = VH > VW;
+  const m = Math.min(VW, VH);
+  L.u = clamp(m / 800, 0.78, 1.6);
+  L.touchPad = isCoarse ? 16 : 10;
+  L.knob = Math.round(clamp(13 * L.u, isCoarse ? 11 : 9, 17));
+  const r = Math.round;
+  L.fonts = {
+    hudLogo:  r(clamp(26 * L.u, 18, 42)),
+    hudLabel: r(clamp(12.5 * L.u, 9, 18)),
+    hudVal:   r(clamp(24 * L.u, 15, 34)),
+    hudValSm: r(clamp(15 * L.u, 12, 20)),
+    hudSmall: r(clamp(13 * L.u, 10, 16)),
+    btn:      r(clamp(20 * L.u, 13, 28)),
+    action:   r(clamp(16 * L.u, 11, 22)),
+    slider:   r(clamp(14 * L.u, 11, 18)),
+    section:  r(clamp(12.5 * L.u, 9, 16))
+  };
+  if (portrait) layoutPortrait();
+  else layoutLandscape();
+}
+
+/* --- portrait phones/tablets: cube on top, control stack below --- */
+function layoutPortrait() {
+  const padBase = Math.max(12, VW * 0.035);
+  const cx0 = insets.l + padBase;                 // content left
+  const cx1 = VW - insets.r - padBase;            // content right
+  const cw = Math.max(120, cx1 - cx0);
+  const top = insets.t;
+  const topPad = Math.max(10, VH * 0.012);
+
+  L.hudH = clamp(VH * 0.085, 58, 84);
+  const hudBottom = top + L.hudH;
+  const avail = Math.max(120, VH - hudBottom - insets.b - topPad);
+
+  /* size the control panel first so it always fits, then give the cube
+   * whatever vertical budget remains. */
+  const rhTarget = clamp(avail * 0.11, 44, 70);
+  const gapTarget = clamp(avail * 0.02, 6, 20);
+  const gapTop = clamp(VH * 0.015, 8, 24);
+  const panelBudget = 4 * rhTarget + 5 * gapTarget;
+  const cubeBudget = avail - panelBudget - gapTop;
+  const scale = clamp(Math.min(VW * 0.155, cubeBudget / 5.05), 24, 120);
+  const cubeCy = hudBottom + gapTop + scale * 1.9;
+  L.cube = { cx: VW / 2, cy: cubeCy, scale };
+  L.ring = { cx: VW / 2, cy: cubeCy + scale * 2.45, rx: scale * 2.5, ry: scale * 0.36 };
+
+  /* vertical view slider beside the cube (left margin) */
+  const sw = clamp(VW * 0.11, 36, 56);
+  const sh = Math.min(clamp(scale * 4.4, 150, 340), (cubeCy - hudBottom - 10) * 2);
+  setRect(C.vslide, cx0, cubeCy - sh / 2, sw, sh);
+
+  /* control panel: 4 rows (L M R / U M D / slider / actions), centered */
+  const panelTop = cubeCy + scale * 3.15;
+  const panelBottom = VH - insets.b - topPad;
+  const panelAvail = Math.max(4 * 34, panelBottom - panelTop);
+  const gapR = clamp(panelAvail * 0.03, 5, 20);
+  const rh = clamp((panelAvail - 5 * gapR) / 4, 30, 74);
+  const used = 4 * rh + 5 * gapR;
+  const g = Math.max(8, cw * 0.02);
+  const bw = (cw - 2 * g) / 3;
+
+  const y1 = panelTop + (panelAvail - used) / 2 + gapR;
+  const y2 = y1 + rh + gapR;
+  const y3 = y2 + rh + gapR;
+  const y4 = y3 + rh + gapR;
+
+  setRect(C.vL, cx0, y1, bw, rh);
+  setRect(C.vM, cx0 + bw + g, y1, bw, rh);
+  setRect(C.vR, cx0 + 2 * (bw + g), y1, bw, rh);
+  setRect(C.hU, cx0, y2, bw, rh);
+  setRect(C.hM, cx0 + bw + g, y2, bw, rh);
+  setRect(C.hD, cx0 + 2 * (bw + g), y2, bw, rh);
+  setRect(C.hslide, cx0, y3, cw, rh);
+  setRect(C.reset, cx0, y4, bw, rh);
+  setRect(C.shuffle, cx0 + bw + g, y4, bw, rh);
+  setRect(C.quit, cx0 + 2 * (bw + g), y4, bw, rh);
+
+  const vsBottom = C.vslide.rect.y + C.vslide.rect.h;
+  L.labels = {
+    vSlices: { x: VW / 2, y: y1 - gapR * 0.5 },
+    hSlices: { x: VW / 2, y: y2 - gapR * 0.5 },
+    hView:   { x: VW / 2, y: y3 - gapR * 0.5 },
+    hViewVal:{ x: VW / 2, y: y3 + rh + gapR * 0.5 },
+    vView:   { x: C.vslide.rect.x, y: vsBottom + 14, align: 'left' },
+    vViewVal:{ x: C.vslide.rect.x, y: vsBottom + 30, align: 'left' }
+  };
+}
+
+/* --- landscape phones / desktops: cube centered, controls around --- */
+function layoutLandscape() {
+  const padY = Math.max(10, VH * 0.02);
+  const padBase = Math.max(12, VW * 0.015);
+  const left = insets.l + padBase;
+  const right = VW - insets.r - padBase;
+  const top = insets.t;
+  const bottom = VH - insets.b;
+
+  L.hudH = clamp(VH * 0.13, 44, 90);
+  const hudBottom = top + L.hudH;
+  const areaTop = hudBottom;
+  const areaBottom = bottom - padY;
+  const areaH = Math.max(160, areaBottom - areaTop);
+
+  /* cube slightly left of centre (right column takes the edge) */
+  const scale = clamp(Math.min(areaH * 0.135, VW * 0.085), 26, 150);
+  const cubeCx = left + (right - left) * 0.47;
+  /* vertical slice buttons (L M R) sit above the cube */
+  const tbW = clamp(VH * 0.19, 60, 100);
+  const tbH = clamp(VH * 0.12, 42, 62);
+  const tgap = clamp(VH * 0.02, 6, 14);
+  const rowW = 3 * tbW + 2 * tgap;
+  const rowX = cubeCx - rowW / 2;
+  const rowY = areaTop + clamp(areaH * 0.055, 8, 30);
+  /* keep the cube far enough below the top row even in very short windows */
+  const cubeCy = Math.max(areaTop + areaH * 0.52, rowY + tbH + scale * 1.9 + 8);
+  L.cube = { cx: cubeCx, cy: cubeCy, scale };
+  L.ring = { cx: cubeCx, cy: cubeCy + scale * 2.35, rx: scale * 2.5, ry: scale * 0.34 };
+  setRect(C.vL, rowX, rowY, tbW, tbH);
+  setRect(C.vM, rowX + tbW + tgap, rowY, tbW, tbH);
+  setRect(C.vR, rowX + 2 * (tbW + tgap), rowY, tbW, tbH);
+
+  /* horizontal slice buttons (U M D) on the right edge */
+  const rbW = clamp(VH * 0.17, 56, 96);
+  const rbH = clamp(VH * 0.12, 42, 64);
+  const rgap = clamp(VH * 0.03, 8, 18);
+  const colH = 3 * rbH + 2 * rgap;
+  const colX = right - rbW;
+  const colY = cubeCy - colH / 2;
+  setRect(C.hU, colX, colY, rbW, rbH);
+  setRect(C.hM, colX, colY + rbH + rgap, rbW, rbH);
+  setRect(C.hD, colX, colY + 2 * (rbH + rgap), rbW, rbH);
+
+  /* vertical view slider on the left edge */
+  const vsW = clamp(VH * 0.11, 36, 56);
+  let vsH = clamp(areaH * 0.6, 140, 420);
+  let vsY = Math.max(cubeCy - vsH / 2, hudBottom + 34); // room for its labels
+  vsH = Math.min(vsH, Math.max(80, areaBottom - vsY));
+  setRect(C.vslide, left, vsY, vsW, vsH);
+
+  /* bottom row: action buttons left, horizontal view slider right */
+  const bottomH = clamp(VH * 0.13, 44, 64);
+  const bottomY = areaBottom - bottomH;
+  const abGap = clamp(VW * 0.008, 6, 14);
+  const abW = clamp(VW * 0.115, 86, 160);
+  setRect(C.reset, left, bottomY, abW, bottomH);
+  setRect(C.shuffle, left + abW + abGap, bottomY, abW, bottomH);
+  setRect(C.quit, left + 2 * (abW + abGap), bottomY, abW, bottomH);
+  const hsX = left + 3 * (abW + abGap) + clamp(VW * 0.02, 14, 30);
+  const hsW = Math.max(60, right - hsX);
+  setRect(C.hslide, hsX, bottomY, hsW, bottomH);
+
+  L.labels = {
+    vSlices: { x: cubeCx, y: Math.max(rowY - 10, hudBottom + 8) },
+    hSlices: { x: colX - Math.max(10, rbW * 0.25), y: cubeCy, rot: true },
+    vView:   { x: C.vslide.rect.x, y: C.vslide.rect.y - 26, align: 'left' },
+    vViewVal:{ x: C.vslide.rect.x, y: C.vslide.rect.y - 12, align: 'left' },
+    hView:   { x: hsX + hsW / 2, y: bottomY - 24 },
+    hViewVal:{ x: hsX + hsW / 2, y: bottomY - 10 }
+  };
+}
 
 function moveFocus(dx, dy) {
   const cur = C[focusKey()];
@@ -361,49 +589,55 @@ function roundRect(x, y, w, h, r) {
 
 function drawArrowIcon(x, y, r, color) { // small clockwise circular arrow
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = Math.max(1.5, r * 0.25);
   ctx.beginPath();
   ctx.arc(x, y, r, -2.4, 1.6);
   ctx.stroke();
   const a = 1.6;
-  const tx = x + Math.cos(a) * r, ty = y + Math.sin(a) * r;
+  const hx = x + Math.cos(a) * r, hy = y + Math.sin(a) * r;
+  const hl = r * 0.6;
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(tx + Math.cos(a + 1.9) * 6, ty + Math.sin(a + 1.9) * 6);
-  ctx.lineTo(tx + Math.cos(a + 0.4) * 6, ty + Math.sin(a + 0.4) * 6);
-  ctx.lineTo(tx, ty);
+  ctx.moveTo(hx + Math.cos(a + 1.9) * hl, hy + Math.sin(a + 1.9) * hl);
+  ctx.lineTo(hx + Math.cos(a + 0.4) * hl, hy + Math.sin(a + 0.4) * hl);
+  ctx.lineTo(hx, hy);
   ctx.closePath();
   ctx.fill();
+}
+
+function fitFont(text, w, h, max) {
+  const f = Math.min(max, w / (0.62 * text.length), h * 0.5);
+  return Math.max(9, Math.round(f));
 }
 
 function drawMoveButton(c, focused) {
   const { x, y, w, h } = c.rect;
   ctx.save();
-  if (focused) { ctx.shadowColor = GOLD; ctx.shadowBlur = 14; }
-  else { ctx.shadowColor = NEON; ctx.shadowBlur = 6; }
-  roundRect(x, y, w, h, 9);
+  if (focused) { ctx.shadowColor = GOLD; ctx.shadowBlur = 14 * GLOW; }
+  else { ctx.shadowColor = NEON; ctx.shadowBlur = 6 * GLOW; }
+  roundRect(x, y, w, h, Math.min(9, h * 0.18));
   ctx.fillStyle = PANEL;
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.strokeStyle = focused ? GOLD : BLUE;
   ctx.lineWidth = focused ? 3 : 2;
   ctx.stroke();
-  drawArrowIcon(x + 20, y + h / 2, 10, focused ? GOLD : NEON);
+  drawArrowIcon(x + w * 0.24, y + h / 2, clamp(h * 0.2, 7, 12), focused ? GOLD : NEON);
   ctx.fillStyle = focused ? GOLD : ICE;
-  ctx.font = 'bold 22px monospace';
+  ctx.font = 'bold ' + Math.max(12, Math.round(Math.min(L.fonts.btn, h * 0.48, w * 0.36))) + 'px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(c.label, x + w - 18, y + h / 2 + 1);
+  ctx.fillText(c.label, x + w * 0.62, y + h / 2 + 1);
   ctx.restore();
 }
 
 function drawActionButton(c, focused, danger) {
   const { x, y, w, h } = c.rect;
   ctx.save();
-  if (focused) { ctx.shadowColor = GOLD; ctx.shadowBlur = 14; }
-  else if (danger) { ctx.shadowColor = RED; ctx.shadowBlur = 8; }
-  else { ctx.shadowColor = NEON; ctx.shadowBlur = 6; }
-  roundRect(x, y, w, h, 9);
+  if (focused) { ctx.shadowColor = GOLD; ctx.shadowBlur = 14 * GLOW; }
+  else if (danger) { ctx.shadowColor = RED; ctx.shadowBlur = 8 * GLOW; }
+  else { ctx.shadowColor = NEON; ctx.shadowBlur = 6 * GLOW; }
+  roundRect(x, y, w, h, Math.min(9, h * 0.18));
   ctx.fillStyle = PANEL;
   ctx.fill();
   ctx.shadowBlur = 0;
@@ -411,7 +645,7 @@ function drawActionButton(c, focused, danger) {
   ctx.lineWidth = focused ? 3 : 2;
   ctx.stroke();
   ctx.fillStyle = focused ? GOLD : (danger ? PINK : ICE);
-  ctx.font = 'bold 17px monospace';
+  ctx.font = 'bold ' + fitFont(c.label, w - 14, h, L.fonts.action) + 'px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(c.label, x + w / 2, y + h / 2 + 1);
@@ -423,75 +657,77 @@ function drawSlider(key, focused) {
   const deg = sliderDeg(key);
   const vertical = key === 'vslide';
   const t = deg / 360;
+  const pad = L.knob;
+  const cx = ccx(C[key]), cy = ccy(C[key]);
   ctx.save();
   if (vertical) {
     // track
     ctx.strokeStyle = focused ? NEON : BLUE;
-    ctx.lineWidth = 5;
+    ctx.lineWidth = Math.max(3, 5 * L.u);
     ctx.beginPath();
-    ctx.moveTo(ccx(C[key]), r.y + 8);
-    ctx.lineTo(ccx(C[key]), r.y + r.h - 8);
+    ctx.moveTo(cx, r.y + pad);
+    ctx.lineTo(cx, r.y + r.h - pad);
     ctx.stroke();
     // ticks every 90°
     ctx.strokeStyle = TEAL;
     ctx.lineWidth = 2;
+    const tick = 12 * clamp(L.u, 0.8, 1.4);
     for (let d = 0; d < 360; d += 90) {
-      const ty = r.y + 8 + (d / 360) * (r.h - 16);
+      const ty = r.y + pad + (d / 360) * (r.h - 2 * pad);
       ctx.beginPath();
-      ctx.moveTo(ccx(C[key]) - 12, ty);
-      ctx.lineTo(ccx(C[key]) + 12, ty);
+      ctx.moveTo(cx - tick, ty);
+      ctx.lineTo(cx + tick, ty);
       ctx.stroke();
     }
     // knob
-    const ky = r.y + 8 + t * (r.h - 16);
+    const ky = r.y + pad + t * (r.h - 2 * pad);
     ctx.shadowColor = NEON;
-    ctx.shadowBlur = focused ? 14 : 8;
+    ctx.shadowBlur = (focused ? 14 : 8) * GLOW;
     ctx.beginPath();
-    ctx.arc(ccx(C[key]), ky, 13, 0, Math.PI * 2);
+    ctx.arc(cx, ky, L.knob, 0, Math.PI * 2);
     ctx.fillStyle = focused ? GOLD : NEON;
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.strokeStyle = focused ? WHITE : ICE;
     ctx.lineWidth = 2;
     ctx.stroke();
-    // value
-    ctx.fillStyle = ICE;
-    ctx.font = 'bold 15px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(Math.round(deg) + '°', r.x + r.w / 2, r.y + r.h + 22);
   } else {
     ctx.strokeStyle = focused ? NEON : BLUE;
-    ctx.lineWidth = 5;
+    ctx.lineWidth = Math.max(3, 5 * L.u);
     ctx.beginPath();
-    ctx.moveTo(r.x + 8, ccy(C[key]));
-    ctx.lineTo(r.x + r.w - 8, ccy(C[key]));
+    ctx.moveTo(r.x + pad, cy);
+    ctx.lineTo(r.x + r.w - pad, cy);
     ctx.stroke();
     ctx.strokeStyle = TEAL;
     ctx.lineWidth = 2;
+    const tick = 12 * clamp(L.u, 0.8, 1.4);
     for (let d = 0; d < 360; d += 90) {
-      const tx = r.x + 8 + (d / 360) * (r.w - 16);
+      const tx = r.x + pad + (d / 360) * (r.w - 2 * pad);
       ctx.beginPath();
-      ctx.moveTo(tx, ccy(C[key]) - 12);
-      ctx.lineTo(tx, ccy(C[key]) + 12);
+      ctx.moveTo(tx, cy - tick);
+      ctx.lineTo(tx, cy + tick);
       ctx.stroke();
     }
-    const kx = r.x + 8 + t * (r.w - 16);
+    const kx = r.x + pad + t * (r.w - 2 * pad);
     ctx.shadowColor = NEON;
-    ctx.shadowBlur = focused ? 14 : 8;
+    ctx.shadowBlur = (focused ? 14 : 8) * GLOW;
     ctx.beginPath();
-    ctx.arc(kx, ccy(C[key]), 13, 0, Math.PI * 2);
+    ctx.arc(kx, cy, L.knob, 0, Math.PI * 2);
     ctx.fillStyle = focused ? GOLD : NEON;
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.strokeStyle = focused ? WHITE : ICE;
     ctx.lineWidth = 2;
     ctx.stroke();
+  }
+  // value readout (position decided by the active layout)
+  const vp = key === 'vslide' ? L.labels.vViewVal : L.labels.hViewVal;
+  if (vp) {
     ctx.fillStyle = ICE;
-    ctx.font = 'bold 15px monospace';
-    ctx.textAlign = 'center';
+    ctx.font = 'bold ' + L.fonts.slider + 'px monospace';
+    ctx.textAlign = vp.align === 'left' ? 'left' : 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(Math.round(deg) + '°', r.x + r.w + 34, ccy(C[key]));
+    ctx.fillText(Math.round(deg) + '°', vp.x, vp.y);
   }
   if (focused) {
     ctx.strokeStyle = GOLD;
@@ -505,62 +741,85 @@ function drawSlider(key, focused) {
 /* ---------------- background / chrome ---------------- */
 function drawBackground() {
   ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, LOGICAL, LOGICAL);
+  ctx.fillRect(0, 0, VW, VH);
   // faint tech grid
+  const step = 40 * clamp(L.u, 0.85, 1.5);
   ctx.strokeStyle = PANEL;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let i = 40; i < LOGICAL; i += 40) {
-    ctx.moveTo(i, 0); ctx.lineTo(i, LOGICAL);
-    ctx.moveTo(0, i); ctx.lineTo(LOGICAL, i);
-  }
+  for (let i = step; i < VW; i += step) { ctx.moveTo(i, 0); ctx.lineTo(i, VH); }
+  for (let j = step; j < VH; j += step) { ctx.moveTo(0, j); ctx.lineTo(VW, j); }
   ctx.stroke();
-  // frame
+  // frame (kept inside the safe area)
+  const o = 6;
+  const fx = insets.l + o, fy = insets.t + o;
+  const fw = VW - insets.l - insets.r - 2 * o;
+  const fh = VH - insets.t - insets.b - 2 * o;
   ctx.strokeStyle = BLUE;
   ctx.lineWidth = 3;
-  ctx.strokeRect(10, 10, LOGICAL - 20, LOGICAL - 20);
+  ctx.strokeRect(fx, fy, fw, fh);
   ctx.strokeStyle = NEON;
   ctx.lineWidth = 1;
-  ctx.strokeRect(16, 16, LOGICAL - 32, LOGICAL - 32);
+  ctx.strokeRect(fx + 6, fy + 6, fw - 12, fh - 12);
+}
+
+function bestStr() {
+  return (best.time === null ? '--:--.-' : fmtTime(best.time)) + ' / ' +
+         (best.moves === null ? '---' : best.moves) + ' mv';
 }
 
 function drawHUD(now) {
   const t = timerOn ? performance.now() - startTime : elapsed;
+  const top = insets.t;
+  const padL = insets.l + Math.max(10, VW * 0.014);
+  const padR = VW - insets.r - Math.max(10, VW * 0.014);
   ctx.save();
   ctx.textBaseline = 'middle';
   // logo
   ctx.shadowColor = NEON;
-  ctx.shadowBlur = 10;
+  ctx.shadowBlur = 10 * GLOW;
   ctx.fillStyle = GOLD;
-  ctx.font = 'bold 30px monospace';
+  ctx.font = 'bold ' + L.fonts.hudLogo + 'px monospace';
   ctx.textAlign = 'left';
-  ctx.fillText('RUBIX', 30, 46);
+  ctx.fillText('RUBIX', padL, top + L.hudH * (portrait ? 0.32 : 0.5));
   ctx.shadowBlur = 0;
-  // time
-  ctx.fillStyle = DIM;
-  ctx.font = 'bold 14px monospace';
+  // best record
+  if (portrait) {
+    // narrow screen: second line under the logo
+    const by = top + L.hudH * 0.74;
+    ctx.font = 'bold ' + L.fonts.hudSmall + 'px monospace';
+    ctx.fillStyle = DIM;
+    ctx.fillText('BEST ', padL, by);
+    ctx.fillStyle = ICE;
+    ctx.fillText(bestStr(), padL + ctx.measureText('BEST ').width, by);
+  } else {
+    ctx.textAlign = 'right';
+    ctx.fillStyle = DIM;
+    ctx.font = 'bold ' + L.fonts.hudSmall + 'px monospace';
+    ctx.fillText('BEST', padR, top + L.hudH * 0.30);
+    ctx.fillStyle = ICE;
+    ctx.font = 'bold ' + L.fonts.hudValSm + 'px monospace';
+    ctx.fillText(bestStr(), padR, top + L.hudH * 0.66);
+  }
+  // time + moves
+  const statX = portrait ? [VW * 0.58, VW * 0.84] : [VW * 0.40, VW * 0.58];
   ctx.textAlign = 'center';
-  ctx.fillText('TIME', 300, 30);
-  ctx.fillStyle = WHITE;
-  ctx.font = 'bold 26px monospace';
-  ctx.fillText(fmtTime(t), 300, 54);
-  // moves
-  ctx.fillStyle = DIM;
-  ctx.font = 'bold 14px monospace';
-  ctx.fillText('MOVES', 470, 30);
-  ctx.fillStyle = LIME;
-  ctx.font = 'bold 26px monospace';
-  ctx.fillText(String(moves).padStart(3, '0'), 470, 54);
-  // best
-  ctx.textAlign = 'right';
-  ctx.fillStyle = DIM;
-  ctx.font = 'bold 12px monospace';
-  ctx.fillText('BEST', 770, 30);
-  ctx.fillStyle = ICE;
-  ctx.font = 'bold 15px monospace';
-  ctx.fillText(
-    (best.time === null ? '--:--.-' : fmtTime(best.time)) + '  /  ' +
-    (best.moves === null ? '---' : best.moves) + ' mv', 770, 52);
+  for (let i = 0; i < 2; i++) {
+    const x = statX[i];
+    ctx.fillStyle = DIM;
+    ctx.font = 'bold ' + L.fonts.hudLabel + 'px monospace';
+    ctx.fillText(i === 0 ? 'TIME' : 'MOVES', x, top + L.hudH * 0.30);
+    ctx.fillStyle = i === 0 ? WHITE : LIME;
+    ctx.font = 'bold ' + L.fonts.hudVal + 'px monospace';
+    ctx.fillText(i === 0 ? fmtTime(t) : String(moves).padStart(3, '0'), x, top + L.hudH * 0.70);
+  }
+  // divider under the HUD strip
+  ctx.strokeStyle = BLUE;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(insets.l, top + L.hudH + 1);
+  ctx.lineTo(VW - insets.r, top + L.hudH + 1);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -579,74 +838,90 @@ function blinkOn(now, ms = 500) {
 /* ---------------- screens ---------------- */
 function drawTitle(now) {
   drawBackground();
+  const cx = VW / 2;
+  const m = Math.min(VW, VH);
   // decorative spinning cube
+  const sc = clamp(Math.min(VW * 0.16, VH * 0.09), 28, 80);
+  const cy = VH * 0.26;
   const a = now * 0.00045;
-  drawCube(400, 340, 62, a, 0.5, now);
+  drawCube(cx, cy, sc, a, 0.5, now);
   // holo ring
   ctx.strokeStyle = BLUE;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.ellipse(400, 560, 170, 26, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy + sc * 2.6, sc * 2.7, sc * 0.4, 0, 0, Math.PI * 2);
   ctx.stroke();
   // logo
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.shadowColor = NEON;
-  ctx.shadowBlur = 26;
-  ctx.fillStyle = WHITE;
-  ctx.font = 'bold 88px monospace';
-  ctx.fillText('RUBIX', 400, 680);
-  ctx.shadowColor = NEON;
-  ctx.shadowBlur = 12;
-  ctx.fillStyle = NEON;
-  ctx.font = 'bold 88px monospace';
-  ctx.fillText('RUBIX', 400, 680);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = ICE;
-  ctx.font = 'bold 18px monospace';
-  ctx.fillText('A R C A D I C   C U B E   S O L V E R', 400, 732);
   if (blinkOn(now)) {
     ctx.fillStyle = GOLD;
-    ctx.font = 'bold 22px monospace';
-    ctx.fillText('TAP OR PRESS ANY KEY TO START', 400, 620);
+    ctx.font = 'bold ' + Math.round(clamp(m * 0.03, 14, 22)) + 'px monospace';
+    ctx.fillText(isCoarse ? 'TAP TO START' : 'TAP OR PRESS ANY KEY TO START', cx, VH * 0.55);
   }
-  ctx.fillStyle = DIM;
-  ctx.font = 'bold 14px monospace';
-  ctx.fillText('ARROW KEYS NAVIGATE  ·  ENTER / SPACE CONFIRM  ·  SLIDERS ROTATE VIEW', 400, 764);
+  ctx.shadowColor = NEON;
+  ctx.shadowBlur = 26 * GLOW;
+  ctx.fillStyle = WHITE;
+  ctx.font = 'bold ' + Math.round(clamp(m * 0.155, 36, 92)) + 'px monospace';
+  ctx.fillText('RUBIX', cx, VH * 0.66);
+  ctx.shadowBlur = 12 * GLOW;
+  ctx.fillStyle = NEON;
+  ctx.fillText('RUBIX', cx, VH * 0.66);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = ICE;
+  ctx.font = 'bold ' + Math.round(clamp(m * 0.022, 10, 18)) + 'px monospace';
+  ctx.fillText('A R C A D I C   C U B E   S O L V E R', cx, VH * 0.735);
   if (best.time !== null) {
     ctx.fillStyle = LIME;
-    ctx.fillText('RECORD  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', 400, 706);
+    ctx.font = 'bold ' + Math.round(clamp(m * 0.02, 11, 16)) + 'px monospace';
+    ctx.fillText('RECORD  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', cx, VH * 0.785);
   }
+  ctx.fillStyle = DIM;
+  ctx.font = 'bold ' + Math.round(clamp(m * 0.017, 9, 14)) + 'px monospace';
+  ctx.fillText(isCoarse
+    ? 'TAP BUTTONS TO ROTATE SLICES · DRAG SLIDERS TO ROTATE VIEW'
+    : 'ARROW KEYS NAVIGATE  ·  ENTER / SPACE CONFIRM  ·  SLIDERS ROTATE VIEW', cx, VH * 0.92);
   ctx.restore();
 }
 
 function drawPlay(now) {
   drawBackground();
   drawHUD(now);
-  // section labels
+  // section labels (positions decided by the active layout)
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = DIM;
-  ctx.font = 'bold 13px monospace';
-  ctx.fillText('VERTICAL SLICES · CLOCKWISE', 400, 96);
-  ctx.save();
-  ctx.translate(778, 412);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillText('HORIZONTAL SLICES', 0, 0);
-  ctx.restore();
-  ctx.fillText('VERTICAL VIEW', C.vslide.rect.x + C.vslide.rect.w / 2, 244);
-  ctx.fillText('HORIZONTAL VIEW', 400, 604);
+  ctx.font = 'bold ' + L.fonts.section + 'px monospace';
+  const lb = L.labels;
+  const label = (txt, l) => {
+    if (!l) return;
+    ctx.textAlign = l.align === 'left' ? 'left' : 'center';
+    ctx.fillText(txt, l.x, l.y);
+    ctx.textAlign = 'center';
+  };
+  label('VERTICAL SLICES · CLOCKWISE', lb.vSlices);
+  if (lb.hSlices) {
+    if (lb.hSlices.rot) {
+      ctx.save();
+      ctx.translate(lb.hSlices.x, lb.hSlices.y);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('HORIZONTAL SLICES', 0, 0);
+      ctx.restore();
+    } else label('HORIZONTAL SLICES', lb.hSlices);
+  }
+  label('VERTICAL VIEW', lb.vView);
+  label('HORIZONTAL VIEW', lb.hView);
   ctx.restore();
   // holo ring under cube
   ctx.strokeStyle = BLUE;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.ellipse(400, 566, 160, 24, 0, 0, Math.PI * 2);
+  ctx.ellipse(L.ring.cx, L.ring.cy, L.ring.rx, L.ring.ry, 0, 0, Math.PI * 2);
   ctx.stroke();
   // the cube
-  drawCube(400, 412, 58, yaw, pitch, now);
+  drawCube(L.cube.cx, L.cube.cy, L.cube.scale, yaw, pitch, now);
   // controls
   const fk = focusKey();
   for (const k of ['vL', 'vM', 'vR', 'hU', 'hM', 'hD']) drawMoveButton(C[k], k === fk);
@@ -658,45 +933,46 @@ function drawPlay(now) {
 
 function drawEnd(now) {
   drawBackground();
-  drawCube(400, 330, 54, -Math.PI / 4, -0.35, now);
+  const cx = VW / 2;
+  const m = Math.min(VW, VH);
+  drawCube(cx, VH * 0.24, clamp(Math.min(VW * 0.14, VH * 0.09), 24, 60), -Math.PI / 4, -0.35, now);
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.shadowColor = LIME;
-  ctx.shadowBlur = 18;
+  ctx.shadowBlur = 18 * GLOW;
   ctx.fillStyle = LIME;
-  ctx.font = 'bold 46px monospace';
-  ctx.fillText('CUBE SOLVED', 400, 520);
+  ctx.font = 'bold ' + Math.round(clamp(m * 0.065, 20, 46)) + 'px monospace';
+  ctx.fillText('CUBE SOLVED', cx, VH * 0.47);
   ctx.shadowBlur = 0;
+  const sx = Math.max(VW * 0.16, 80);
   ctx.fillStyle = DIM;
-  ctx.font = 'bold 16px monospace';
-  ctx.fillText('TIME', 260, 572);
-  ctx.fillText('MOVES', 540, 572);
+  ctx.font = 'bold ' + Math.round(clamp(m * 0.02, 11, 16)) + 'px monospace';
+  ctx.fillText('TIME', cx - sx, VH * 0.56);
+  ctx.fillText('MOVES', cx + sx, VH * 0.56);
   ctx.fillStyle = WHITE;
-  ctx.font = 'bold 34px monospace';
-  ctx.fillText(fmtTime(elapsed), 260, 602);
+  ctx.font = 'bold ' + Math.round(clamp(m * 0.045, 16, 34)) + 'px monospace';
+  ctx.fillText(fmtTime(elapsed), cx - sx, VH * 0.625);
   ctx.fillStyle = LIME;
-  ctx.fillText(String(moves), 540, 602);
-  let yy = 648;
+  ctx.fillText(String(moves), cx + sx, VH * 0.625);
   if (endRecT || endRecM) {
     ctx.shadowColor = GOLD;
-    ctx.shadowBlur = 14;
+    ctx.shadowBlur = 14 * GLOW;
     ctx.fillStyle = GOLD;
-    ctx.font = 'bold 24px monospace';
-    if (endRecT && endRecM) ctx.fillText('★ DOUBLE NEW RECORD ★', 400, yy);
-    else if (endRecT) ctx.fillText('★ NEW RECORD — TIME ★', 400, yy);
-    else ctx.fillText('★ NEW RECORD — MOVES ★', 400, yy);
+    ctx.font = 'bold ' + Math.round(clamp(m * 0.035, 14, 24)) + 'px monospace';
+    if (endRecT && endRecM) ctx.fillText('★ DOUBLE NEW RECORD ★', cx, VH * 0.70);
+    else if (endRecT) ctx.fillText('★ NEW RECORD — TIME ★', cx, VH * 0.70);
+    else ctx.fillText('★ NEW RECORD — MOVES ★', cx, VH * 0.70);
     ctx.shadowBlur = 0;
-    yy += 34;
   }
   if (blinkOn(now)) {
     ctx.fillStyle = ICE;
-    ctx.font = 'bold 20px monospace';
-    ctx.fillText('PRESS ENTER OR TAP TO PLAY AGAIN', 400, 740);
+    ctx.font = 'bold ' + Math.round(clamp(m * 0.028, 13, 20)) + 'px monospace';
+    ctx.fillText(isCoarse ? 'TAP TO PLAY AGAIN' : 'PRESS ENTER OR TAP TO PLAY AGAIN', cx, VH * 0.845);
   }
   ctx.fillStyle = DIM;
-  ctx.font = 'bold 13px monospace';
-  ctx.fillText('BEST  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', 400, 770);
+  ctx.font = 'bold ' + Math.round(clamp(m * 0.018, 10, 14)) + 'px monospace';
+  ctx.fillText('BEST  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', cx, VH * 0.925);
   ctx.restore();
 }
 
@@ -704,19 +980,20 @@ function drawEnd(now) {
 function toLogical(e) {
   const r = canvas.getBoundingClientRect();
   return [
-    (e.clientX - r.left) / r.width * LOGICAL,
-    (e.clientY - r.top) / r.height * LOGICAL
+    (e.clientX - r.left) / r.width * VW,
+    (e.clientY - r.top) / r.height * VH
   ];
 }
-function inRect(p, r, pad = 10) {
+function inRect(p, r, pad = L.touchPad) {
   return p[0] >= r.x - pad && p[0] <= r.x + r.w + pad &&
          p[1] >= r.y - pad && p[1] <= r.y + r.h + pad;
 }
 function applySliderAt(key, p) {
   const r = C[key].rect;
+  const pad = L.knob;
   let t;
-  if (key === 'hslide') t = (p[0] - (r.x + 8)) / (r.w - 16);
-  else t = (p[1] - (r.y + 8)) / (r.h - 16);
+  if (key === 'hslide') t = (p[0] - (r.x + pad)) / (r.w - 2 * pad);
+  else t = (p[1] - (r.y + pad)) / (r.h - 2 * pad);
   t = Math.max(0, Math.min(1, t));
   setSliderDeg(key, t * 359.999);
 }
@@ -729,11 +1006,13 @@ canvas.addEventListener('pointerdown', (e) => {
   if (screen === 'end') { if (now >= endReadyAt) startGame(); return; }
   const p = toLogical(e);
   for (const k of ['vslide', 'hslide']) {
-    if (inRect(p, C[k].rect, 6)) {
+    if (inRect(p, C[k].rect, L.touchPad + 4)) {
       focusIdx = focusList.indexOf(k);
       applySliderAt(k, p);
       dragKey = k;
-      canvas.setPointerCapture(e.pointerId);
+      if (canvas.setPointerCapture) {
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      }
       return;
     }
   }
@@ -752,6 +1031,9 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', () => { dragKey = null; });
 canvas.addEventListener('pointercancel', () => { dragKey = null; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+/* block browser zoom gestures so play feels native */
+document.addEventListener('dblclick', (e) => e.preventDefault());
+document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 window.addEventListener('keydown', (e) => {
   const k = e.key;
@@ -790,11 +1072,22 @@ window.addEventListener('keydown', (e) => {
 /* ---------------- main loop ---------------- */
 function frame(now) {
   if (anim && now - anim.start >= anim.dur) commitAnim(now);
-  ctx.setTransform(unit, 0, 0, unit, 0, 0);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   if (screen === 'title') drawTitle(now);
   else if (screen === 'play') drawPlay(now);
   else drawEnd(now);
   requestAnimationFrame(frame);
 }
 resetCube();
+resize();
 frame(performance.now());            // draws immediately, then chains rAF
+
+/* test hook (harmless in normal browser use) */
+if (typeof window !== 'undefined' && window.__RUBIX_TEST__) {
+  window.__rubix = {
+    state: () => ({ VW, VH, portrait, insets, L, C, focusList, screen }),
+    setScreen: (s) => { screen = s; },
+    startGame,
+    draw: () => frame(performance.now())
+  };
+}

@@ -2,8 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- viewport-fit=cover lets the canvas use the whole screen on notched
+     phones; user-scalable=no blocks pinch/double-tap zoom during play -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#000000">
+<!-- full-screen "app" feel when launched from the home screen -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>RUBIX — Arcadic Cube Solver</title>
 <style>
   html, body {
@@ -13,15 +19,21 @@
     height: 100%;
     background: #000000;
     overflow: hidden;
-  }
-  body {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    position: fixed;            /* stops iOS rubber-band scrolling */
+    inset: 0;
+    overscroll-behavior: none;
+    touch-action: none;         /* no scroll/zoom gestures anywhere */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;    /* no long-press callout on iOS */
+    -webkit-tap-highlight-color: transparent;
   }
   #game {
+    position: absolute;
+    left: 0;
+    top: 0;
     display: block;
-    touch-action: none;      /* no scroll/zoom gestures over the canvas */
+    touch-action: none;
     cursor: pointer;
   }
 </style>
