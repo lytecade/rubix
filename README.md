@@ -2,18 +2,6 @@
 
 **Rubix** is an arcade-style Rubik's cube solver game with a cyberpunk / sci-fi theme.
 Built with pure HTML5 Canvas + vanilla JavaScript — no external libraries, no assets.
-The entire game is rendered in the **Arne16** 16-color palette.
-
-## Run it
-
-Open `index.html` directly in any modern browser, or serve the folder:
-
-```bash
-python3 -m http.server 8000
-# then visit http://localhost:8000
-```
-
-Works on desktop and mobile.
 
 ## How to play
 
@@ -41,28 +29,3 @@ Works on desktop and mobile.
 | Rotate view | Tap or drag the sliders | Focus a slider (arrows), then **←/→** adjusts the bottom slider, **↑/↓** adjusts the left slider (15° steps) |
 | Reset view / shuffle / quit | Tap the button | Focus with arrows, **Enter / Space** |
 
-## Files
-
-| File | Purpose |
-|---|---|
-| `index.html` | Page shell, full-viewport canvas, mobile/app meta |
-| `game.js` | Entire game: 3D math, cube logic, responsive layout, rendering, input, screens |
-| `tests/layout_smoke.js` | Headless check that the responsive layout fits every device class |
-| `README.md` | This file |
-
-## Tech notes
-
-- **3D engine**: hand-rolled quaternion math, per-cubie transforms, perspective
-  projection, backface culling and painter's-algorithm depth sorting on a 2D canvas.
-- **Responsive graphics**: the canvas fills the whole viewport and a layout engine
-  recomputes every control position/size on resize and orientation change. Phones
-  and other coarse-pointer devices are detected and get a dedicated **portrait**
-  layout (cube on top, full-width button stack below) and a dedicated **landscape**
-  layout (cube centered, controls on the edges); desktop windows simply scale to
-  the viewport. Rendering uses a `devicePixelRatio`-aware backing store for crisp,
-  high-quality graphics, respects `env(safe-area-inset-*)` on notched phones, and
-  uses ≥44px touch targets plus reduced glow effects for native-feeling mobile play.
-- **Palette (Arne16)**: `#000000 #9D9D9D #FFFFFF #BE2633 #E06F8B #493C2B #A46422
-  #EB8931 #F7E26B #2F484E #44891A #A3CE27 #1B2632 #005784 #31A2F2 #B2DCEF` —
-  these 16 hex codes are the only colors used anywhere (shading picks the
-  nearest palette entry so every rendered fill stays inside the palette).
