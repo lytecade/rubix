@@ -154,16 +154,17 @@ function resetCube() {
       }
 }
 
-/* clockwise 90° moves: vertical slices (L,M,R) about +X as seen from the
- * right side; horizontal slices (U,M,D) about +Y as seen from above.
- * Both are -90° by the right-hand rule. */
-function moveQuat(axis) {
-  return axis === 'x' ? Q.axisAngle(1, 0, 0, -Math.PI / 2)
-                      : Q.axisAngle(0, 1, 0, -Math.PI / 2);
+/* 90° slice moves around axes X, Y, and Z.
+ * dir = -1 (clockwise, default for legacy buttons) or +1 (counter-clockwise). */
+function moveQuat(axis, dir = -1) {
+  const a = dir * (Math.PI / 2);
+  if (axis === 'x') return Q.axisAngle(1, 0, 0, a);
+  if (axis === 'y') return Q.axisAngle(0, 1, 0, a);
+  return Q.axisAngle(0, 0, 1, a);
 }
 
-function applyMove(axis, layer) { // commit instantly
-  const qa = moveQuat(axis);
+function applyMove(axis, layer, dir = -1) { // commit instantly
+  const qa = moveQuat(axis, dir);
   for (const c of cubies) {
     if (c[axis] !== layer) continue;
     c.q = Q.mul(qa, c.q);
@@ -223,13 +224,19 @@ function saveBest() {
 function reshuffle() {
   resetCube();
   const all = [];
-  for (const ax of ['x', 'y']) for (const l of [-1, 0, 1]) all.push([ax, l]);
+  for (const ax of ['x', 'y', 'z']) {
+    for (const l of [-1, 0, 1]) {
+      for (const d of [-1, 1]) {
+        all.push([ax, l, d]);
+      }
+    }
+  }
   let prev = -1;
   for (let i = 0; i < 28; i++) {
     let j;
     do { j = Math.floor(Math.random() * all.length); } while (j === prev);
     prev = j;
-    applyMove(all[j][0], all[j][1]);
+    applyMove(all[j][0], all[j][1], all[j][2]);
   }
   if (isSolved()) reshuffle();
   moves = 0;
@@ -248,15 +255,15 @@ function startGame() {
   screen = 'play';
 }
 
-function doMove(axis, layer) {
-  if (anim) { pending = { axis, layer }; return; }
+function doMove(axis, layer, dir = -1) {
+  if (anim) { pending = { axis, layer, dir }; return; }
   if (!timerOn) { timerOn = true; startTime = performance.now(); }
   moves++;
-  anim = { axis, layer, start: performance.now(), dur: 170 };
+  anim = { axis, layer, dir, start: performance.now(), dur: 170 };
 }
 
 function commitAnim(now) {
-  applyMove(anim.axis, anim.layer);
+  applyMove(anim.axis, anim.layer, anim.dir);
   anim = null;
   if (screen === 'play' && isSolved()) {
     timerOn = false;
@@ -269,7 +276,7 @@ function commitAnim(now) {
     screen = 'end';
   } else if (pending) {
     const p = pending; pending = null;
-    doMove(p.axis, p.layer);
+    doMove(p.axis, p.layer, p.dir);
   }
 }
 
@@ -521,8 +528,19 @@ const FACE_DEFS = [
 ];
 const ease = (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
+function getViewQuat(y = yaw, p = pitch) {
+  return Q.mul(Q.axisAngle(1, 0, 0, p), Q.axisAngle(0, 1, 0, y));
+}
+
+function projectPoint(p, cx, cy, scale, qView) {
+  const camD = 9;
+  const pv = Q.rot(qView, p);
+  const s = camD / (camD - pv[2]);
+  return [cx + pv[0] * s * scale, cy - pv[1] * s * scale];
+}
+
 function drawCube(cx, cy, scale, viewYaw, viewPitch, now) {
-  const qView = Q.mul(Q.axisAngle(1, 0, 0, viewPitch), Q.axisAngle(0, 1, 0, viewYaw));
+  const qView = getViewQuat(viewYaw, viewPitch);
   const camD = 9;
   const items = [];
 
@@ -530,8 +548,11 @@ function drawCube(cx, cy, scale, viewYaw, viewPitch, now) {
     let px = c.x, py = c.y, pz = c.z, q = c.q;
     if (anim && c[anim.axis] === anim.layer) {
       const k = Math.min(1, (now - anim.start) / anim.dur);
-      const a = -ease(k) * Math.PI / 2;
-      const qa = anim.axis === 'x' ? Q.axisAngle(1, 0, 0, a) : Q.axisAngle(0, 1, 0, a);
+      const dir = anim.dir !== undefined ? anim.dir : -1;
+      const a = dir * ease(k) * Math.PI / 2;
+      const qa = anim.axis === 'x' ? Q.axisAngle(1, 0, 0, a)
+               : anim.axis === 'y' ? Q.axisAngle(0, 1, 0, a)
+               : Q.axisAngle(0, 0, 1, a);
       const p = Q.rot(qa, [c.x, c.y, c.z]);
       px = p[0]; py = p[1]; pz = p[2];
       q = Q.mul(qa, c.q);
@@ -543,9 +564,7 @@ function drawCube(cx, cy, scale, viewYaw, viewPitch, now) {
       const ctr = Q.rot(qView, [px, py, pz]);
       const verts = f.v.map((v) => {
         const l = Q.rot(q, v);
-        const pv = Q.rot(qView, [px + l[0], py + l[1], pz + l[2]]);
-        const s = camD / (camD - pv[2]);
-        return [cx + pv[0] * s * scale, cy - pv[1] * s * scale];
+        return projectPoint([px + l[0], py + l[1], pz + l[2]], cx, cy, scale, qView);
       });
       items.push({ z: ctr[2], verts, f, n, sticker: c.colors[f.c] || null });
     }
@@ -574,6 +593,89 @@ function poly(pts, fill) {
   ctx.closePath();
   ctx.fillStyle = fill;
   ctx.fill();
+}
+
+function pointInPoly(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    const intersect = ((yi > pt[1]) !== (yj > pt[1])) &&
+      (pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function hitTestCube(pt) {
+  const qView = getViewQuat();
+  const cx = L.cube.cx, cy = L.cube.cy, scale = L.cube.scale;
+  const items = [];
+
+  for (const c of cubies) {
+    let px = c.x, py = c.y, pz = c.z, q = c.q;
+    for (const f of FACE_DEFS) {
+      const n = Q.rot(q, f.n);
+      const nv = Q.rot(qView, n);
+      if (nv[2] <= 0.001) continue; // backface cull
+      const ctr = Q.rot(qView, [px, py, pz]);
+      const verts = f.v.map((v) => {
+        const l = Q.rot(q, v);
+        return projectPoint([px + l[0], py + l[1], pz + l[2]], cx, cy, scale, qView);
+      });
+      items.push({
+        cubie: c,
+        f,
+        normal: [Math.round(n[0]), Math.round(n[1]), Math.round(n[2])],
+        verts,
+        z: ctr[2]
+      });
+    }
+  }
+
+  items.sort((a, b) => a.z - b.z);
+
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (pointInPoly(pt, items[i].verts)) {
+      return items[i];
+    }
+  }
+  return null;
+}
+
+function getFaceTangents(cubie, normal) {
+  const qView = getViewQuat();
+  const cx = L.cube.cx, cy = L.cube.cy, scale = L.cube.scale;
+
+  const p0 = [
+    cubie.x + normal[0] * 0.5,
+    cubie.y + normal[1] * 0.5,
+    cubie.z + normal[2] * 0.5
+  ];
+  const s0 = projectPoint(p0, cx, cy, scale, qView);
+
+  let axes = [];
+  if (normal[0] !== 0) axes = ['y', 'z'];
+  else if (normal[1] !== 0) axes = ['x', 'z'];
+  else axes = ['x', 'y'];
+
+  const tangents = [];
+  for (const ax of axes) {
+    const vec3D = [ax === 'x' ? 1 : 0, ax === 'y' ? 1 : 0, ax === 'z' ? 1 : 0];
+    const p1 = [p0[0] + vec3D[0], p0[1] + vec3D[1], p0[2] + vec3D[2]];
+    const s1 = projectPoint(p1, cx, cy, scale, qView);
+    const screenVec = [s1[0] - s0[0], s1[1] - s0[1]];
+    const len = Math.hypot(screenVec[0], screenVec[1]) || 1;
+    const unitScreen = [screenVec[0] / len, screenVec[1] / len];
+    tangents.push({
+      axis: ax,
+      vec3D,
+      unitScreen,
+      screenLen: len
+    });
+  }
+
+  return { p0, s0, tangents };
 }
 
 /* ---------------- UI widgets ---------------- */
@@ -880,8 +982,8 @@ function drawTitle(now) {
   ctx.fillStyle = DIM;
   ctx.font = 'bold ' + Math.round(clamp(m * 0.017, 9, 14)) + 'px monospace';
   ctx.fillText(isCoarse
-    ? 'TAP BUTTONS TO ROTATE SLICES · DRAG SLIDERS TO ROTATE VIEW'
-    : 'ARROW KEYS NAVIGATE  ·  ENTER / SPACE CONFIRM  ·  SLIDERS ROTATE VIEW', cx, VH * 0.92);
+    ? 'DRAG CUBE SLICES TO ROTATE · SLIDERS OR BG TO ROTATE VIEW'
+    : 'DRAG CUBE SLICES TO ROTATE · ARROWS / ENTER / BUTTONS ALSO WORK', cx, VH * 0.92);
   ctx.restore();
 }
 
@@ -922,6 +1024,22 @@ function drawPlay(now) {
   ctx.stroke();
   // the cube
   drawCube(L.cube.cx, L.cube.cy, L.cube.scale, yaw, pitch, now);
+  // highlight actively dragged cubie face
+  if (cubeDrag && !cubeDrag.triggered && cubeDrag.verts) {
+    ctx.save();
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = Math.max(2, 3 * L.u);
+    ctx.shadowColor = GOLD;
+    ctx.shadowBlur = 12 * GLOW;
+    ctx.beginPath();
+    ctx.moveTo(cubeDrag.verts[0][0], cubeDrag.verts[0][1]);
+    for (let i = 1; i < cubeDrag.verts.length; i++) {
+      ctx.lineTo(cubeDrag.verts[i][0], cubeDrag.verts[i][1]);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
   // controls
   const fk = focusKey();
   for (const k of ['vL', 'vM', 'vR', 'hU', 'hM', 'hD']) drawMoveButton(C[k], k === fk);
@@ -999,23 +1117,34 @@ function applySliderAt(key, p) {
 }
 
 let dragKey = null;
+let cubeDrag = null;
+let viewDrag = null;
+
 canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   const now = performance.now();
   if (screen === 'title') { startGame(); return; }
   if (screen === 'end') { if (now >= endReadyAt) startGame(); return; }
+
+  // If a previous move is animating, commit it immediately so input is instantaneous
+  if (anim) commitAnim(now);
+
   const p = toLogical(e);
+
+  // 1. Sliders
   for (const k of ['vslide', 'hslide']) {
     if (inRect(p, C[k].rect, L.touchPad + 4)) {
       focusIdx = focusList.indexOf(k);
       applySliderAt(k, p);
       dragKey = k;
       if (canvas.setPointerCapture) {
-        try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+        try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
       }
       return;
     }
   }
+
+  // 2. Control buttons
   for (const k of focusList) {
     if (isSlideKey(k)) continue;
     if (inRect(p, C[k].rect)) {
@@ -1024,12 +1153,136 @@ canvas.addEventListener('pointerdown', (e) => {
       return;
     }
   }
+
+  // 3. 3D Cube Hit-Test (Direct Slice Drag)
+  const hit = hitTestCube(p);
+  if (hit) {
+    const { s0, tangents } = getFaceTangents(hit.cubie, hit.normal);
+    cubeDrag = {
+      pointerId: e.pointerId,
+      start: p,
+      cubie: hit.cubie,
+      normal: hit.normal,
+      tangents,
+      verts: hit.verts,
+      triggered: false
+    };
+    if (canvas.setPointerCapture) {
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    return;
+  }
+
+  // 4. Background Drag (Camera View Orbit)
+  viewDrag = {
+    pointerId: e.pointerId,
+    start: p,
+    startYaw: yaw,
+    startPitch: pitch
+  };
+  if (canvas.setPointerCapture) {
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+  }
 });
+
 canvas.addEventListener('pointermove', (e) => {
-  if (dragKey) applySliderAt(dragKey, toLogical(e));
+  const p = toLogical(e);
+
+  // Dynamic cursor style when hovering on play screen
+  if (!dragKey && !cubeDrag && !viewDrag && screen === 'play') {
+    let overInteractive = false;
+    for (const k of focusList) {
+      if (inRect(p, C[k].rect, isSlideKey(k) ? L.touchPad + 4 : L.touchPad)) {
+        overInteractive = true;
+        break;
+      }
+    }
+    if (overInteractive) {
+      canvas.style.cursor = 'pointer';
+    } else if (hitTestCube(p)) {
+      canvas.style.cursor = 'grab';
+    } else {
+      canvas.style.cursor = 'default';
+    }
+  }
+
+  if (dragKey) {
+    applySliderAt(dragKey, p);
+    return;
+  }
+
+  if (cubeDrag && !cubeDrag.triggered) {
+    canvas.style.cursor = 'grabbing';
+    const dx = p[0] - cubeDrag.start[0];
+    const dy = p[1] - cubeDrag.start[1];
+    const delta = [dx, dy];
+
+    const t0 = cubeDrag.tangents[0];
+    const t1 = cubeDrag.tangents[1];
+
+    const proj0 = delta[0] * t0.unitScreen[0] + delta[1] * t0.unitScreen[1];
+    const proj1 = delta[0] * t1.unitScreen[0] + delta[1] * t1.unitScreen[1];
+
+    const deadZone = Math.max(12, 14 * L.u);
+    if (Math.max(Math.abs(proj0), Math.abs(proj1)) >= deadZone) {
+      cubeDrag.triggered = true;
+
+      let chosenT, projVal;
+      if (Math.abs(proj0) >= Math.abs(proj1)) {
+        chosenT = t0;
+        projVal = proj0;
+      } else {
+        chosenT = t1;
+        projVal = proj1;
+      }
+
+      const sign = projVal > 0 ? 1 : -1;
+      const T_3D = [
+        sign * chosenT.vec3D[0],
+        sign * chosenT.vec3D[1],
+        sign * chosenT.vec3D[2]
+      ];
+
+      // Cross product R = Normal x T_3D
+      const N = cubeDrag.normal;
+      const rx = Math.round(N[1] * T_3D[2] - N[2] * T_3D[1]);
+      const ry = Math.round(N[2] * T_3D[0] - N[0] * T_3D[2]);
+      const rz = Math.round(N[0] * T_3D[1] - N[1] * T_3D[0]);
+
+      let rotAxis, rotDir;
+      if (rx !== 0) { rotAxis = 'x'; rotDir = rx; }
+      else if (ry !== 0) { rotAxis = 'y'; rotDir = ry; }
+      else { rotAxis = 'z'; rotDir = rz; }
+
+      const layer = cubeDrag.cubie[rotAxis];
+      doMove(rotAxis, layer, rotDir);
+    }
+    return;
+  }
+
+  if (viewDrag) {
+    const dx = p[0] - viewDrag.start[0];
+    const dy = p[1] - viewDrag.start[1];
+    const sensX = (Math.PI * 2) / Math.max(VW, 400);
+    const sensY = (Math.PI * 2) / Math.max(VH, 400);
+
+    yaw = ((viewDrag.startYaw + dx * sensX) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    pitch = ((viewDrag.startPitch + dy * sensY) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    return;
+  }
 });
-canvas.addEventListener('pointerup', () => { dragKey = null; });
-canvas.addEventListener('pointercancel', () => { dragKey = null; });
+
+function endPointerDrag(e) {
+  dragKey = null;
+  cubeDrag = null;
+  viewDrag = null;
+  if (canvas.releasePointerCapture && e && e.pointerId) {
+    try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+  }
+}
+canvas.addEventListener('pointerup', endPointerDrag);
+canvas.addEventListener('pointercancel', endPointerDrag);
+window.addEventListener('blur', () => { dragKey = null; cubeDrag = null; viewDrag = null; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 /* block browser zoom gestures so play feels native */
 document.addEventListener('dblclick', (e) => e.preventDefault());
@@ -1085,9 +1338,26 @@ frame(performance.now());            // draws immediately, then chains rAF
 /* test hook (harmless in normal browser use) */
 if (typeof window !== 'undefined' && window.__RUBIX_TEST__) {
   window.__rubix = {
-    state: () => ({ VW, VH, portrait, insets, L, C, focusList, screen }),
+    state: () => ({ VW, VH, portrait, insets, L, C, focusList, screen, anim, pending, moves, yaw, pitch, cubeDrag, viewDrag }),
     setScreen: (s) => { screen = s; },
     startGame,
-    draw: () => frame(performance.now())
+    draw: () => frame(performance.now()),
+    cubies,
+    doMove,
+    applyMove,
+    isSolved,
+    hitTestCube,
+    getFaceTangents,
+    projectPoint,
+    getViewQuat,
+    pointInPoly
+  };
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    Q, cubies, resetCube, moveQuat, applyMove, isSolved, doMove,
+    hitTestCube, getFaceTangents, projectPoint, getViewQuat, pointInPoly,
+    FACE_DEFS, L, C, focusList
   };
 }
