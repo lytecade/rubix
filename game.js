@@ -255,7 +255,6 @@ function startGame() {
   reshuffle();
   yaw = DEFAULT_VIEW_RAD;
   pitch = DEFAULT_VIEW_RAD;
-  focusIdx = 1; // start focused on M (vertical middle)
   screen = 'play';
 }
 
@@ -288,29 +287,23 @@ function commitAnim(now) {
  * Control types / actions are fixed; their rects are recomputed by
  * computeLayout() for the current viewport, orientation & device class. */
 const C = {
-  vL:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'x', layer: -1, label: 'L' },
-  vM:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'x', layer: 0,  label: 'M' },
-  vR:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'x', layer: 1,  label: 'R' },
-  hU:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'y', layer: 1,  label: 'U' },
-  hM:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'y', layer: 0,  label: 'M' },
-  hD:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'move', axis: 'y', layer: -1, label: 'D' },
-  vslide: { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'vslide' },
-  hslide: { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'hslide' },
+  vslide:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'vslide' },
+  hslide:  { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'hslide' },
   reset:   { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'reset',   label: 'RESET VIEW' },
   shuffle: { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'shuffle', label: 'SHUFFLE' },
   quit:    { rect: { x: 0, y: 0, w: 0, h: 0 }, type: 'quit',    label: 'QUIT' }
 };
-const focusList = ['vL', 'vM', 'vR', 'vslide', 'hU', 'hM', 'hD', 'hslide', 'reset', 'shuffle', 'quit'];
-let focusIdx = 1;
+const controlKeys = ['vslide', 'hslide', 'reset', 'shuffle', 'quit'];
+const actionKeys = ['reset', 'shuffle', 'quit'];
 
 const ccx = (c) => c.rect.x + c.rect.w / 2;
 const ccy = (c) => c.rect.y + c.rect.h / 2;
-const focusKey = () => focusList[focusIdx];
 const isSlideKey = (k) => k === 'vslide' || k === 'hslide';
 
 /* computed layout, refreshed on every resize / orientation change */
 const L = {
   u: 1,                 // global UI size multiplier
+  hudTop: 12,
   hudH: 60,
   touchPad: 12,         // hit-test padding around controls
   knob: 13,             // slider knob radius
@@ -326,7 +319,7 @@ function setRect(c, x, y, w, h) {
 function computeLayout() {
   portrait = VH > VW;
   const m = Math.min(VW, VH);
-  L.u = clamp(m / 800, 0.78, 1.6);
+  L.u = clamp(m / 800, 0.74, 1.6);
   L.touchPad = isCoarse ? 16 : 10;
   L.knob = Math.round(clamp(13 * L.u, isCoarse ? 11 : 9, 17));
   const r = Math.round;
@@ -334,169 +327,129 @@ function computeLayout() {
     hudLogo:  r(clamp(26 * L.u, 18, 42)),
     hudLabel: r(clamp(12.5 * L.u, 9, 18)),
     hudVal:   r(clamp(24 * L.u, 15, 34)),
-    hudValSm: r(clamp(15 * L.u, 12, 20)),
-    hudSmall: r(clamp(13 * L.u, 10, 16)),
-    btn:      r(clamp(20 * L.u, 13, 28)),
+    hudValSm: r(clamp(15 * L.u, 11, 20)),
+    hudSmall: r(clamp(13 * L.u, 9, 16)),
     action:   r(clamp(16 * L.u, 11, 22)),
-    slider:   r(clamp(14 * L.u, 11, 18)),
+    slider:   r(clamp(14 * L.u, 10, 18)),
     section:  r(clamp(12.5 * L.u, 9, 16))
   };
   if (portrait) layoutPortrait();
   else layoutLandscape();
 }
 
-/* --- portrait phones/tablets: cube on top, control stack below --- */
+/* --- portrait phones/tablets: HUD top, cube + vertical slider middle, horizontal slider + actions bottom --- */
 function layoutPortrait() {
-  const padBase = Math.max(12, VW * 0.035);
+  const framePad = 12;
+  const padBase = Math.max(14, VW * 0.035);
   const cx0 = insets.l + padBase;                 // content left
   const cx1 = VW - insets.r - padBase;            // content right
-  const cw = Math.max(120, cx1 - cx0);
-  const top = insets.t;
-  const topPad = Math.max(10, VH * 0.012);
+  const cw = Math.max(160, cx1 - cx0);
 
-  L.hudH = clamp(VH * 0.085, 58, 84);
-  const hudBottom = top + L.hudH;
-  const avail = Math.max(120, VH - hudBottom - insets.b - topPad);
+  L.hudTop = insets.t + framePad;
+  L.hudH = clamp(VH * 0.088, 56, 86);
+  const hudBottom = L.hudTop + L.hudH;
 
-  /* size the control panel first so it always fits, then give the cube
-   * whatever vertical budget remains. */
-  const rhTarget = clamp(avail * 0.11, 44, 70);
-  const gapTarget = clamp(avail * 0.02, 6, 20);
-  const gapTop = clamp(VH * 0.015, 8, 24);
-  const panelBudget = 4 * rhTarget + 5 * gapTarget;
-  const cubeBudget = avail - panelBudget - gapTop;
-  const scale = clamp(Math.min(VW * 0.155, cubeBudget / 5.05), 24, 120);
-  const cubeCy = hudBottom + gapTop + scale * 1.9;
-  L.cube = { cx: VW / 2, cy: cubeCy, scale };
+  /* bottom stack: horizontal view slider + action buttons (RESET VIEW, SHUFFLE, QUIT) */
+  const bottomPad = insets.b + Math.max(14, VH * 0.018);
+  const rowH = clamp(VH * 0.068, 40, 66);
+  const midGap = clamp(VH * 0.036, 22, 34);
+  const labelLead = clamp(VH * 0.024, 16, 26);
 
-  /* vertical view slider beside the cube (left margin) */
-  const sw = clamp(VW * 0.11, 36, 56);
-  const sh = Math.min(clamp(scale * 4.4, 150, 340), (cubeCy - hudBottom - 10) * 2);
-  setRect(C.vslide, cx0, cubeCy - sh / 2, sw, sh);
+  const btnY = VH - bottomPad - rowH;
+  const btnGap = Math.max(8, cw * 0.025);
+  const bw = (cw - 2 * btnGap) / 3;
+  setRect(C.reset,   cx0,               btnY, bw, rowH);
+  setRect(C.shuffle, cx0 + bw + btnGap, btnY, bw, rowH);
+  setRect(C.quit,    cx0 + 2 * (bw + btnGap), btnY, bw, rowH);
 
-  /* control panel: 4 rows (L M R / U M D / slider / actions), centered */
-  const panelTop = cubeCy + scale * 3.15;
-  const panelBottom = VH - insets.b - topPad;
-  const panelAvail = Math.max(4 * 34, panelBottom - panelTop);
-  const gapR = clamp(panelAvail * 0.03, 5, 20);
-  const rh = clamp((panelAvail - 5 * gapR) / 4, 30, 74);
-  const used = 4 * rh + 5 * gapR;
-  const g = Math.max(8, cw * 0.02);
-  const bw = (cw - 2 * g) / 3;
+  const hSlideY = btnY - midGap - rowH;
+  setRect(C.hslide, cx0, hSlideY, cw, rowH);
+  const controlsTop = hSlideY - labelLead;
 
-  const y1 = panelTop + (panelAvail - used) / 2 + gapR;
-  const y2 = y1 + rh + gapR;
-  const y3 = y2 + rh + gapR;
-  const y4 = y3 + rh + gapR;
+  /* middle play zone: vertical slider on left, cube centered in remaining space */
+  const areaTop = hudBottom + Math.max(10, VH * 0.015);
+  const areaBottom = controlsTop - Math.max(10, VH * 0.015);
+  const areaH = Math.max(120, areaBottom - areaTop);
 
-  setRect(C.vL, cx0, y1, bw, rh);
-  setRect(C.vM, cx0 + bw + g, y1, bw, rh);
-  setRect(C.vR, cx0 + 2 * (bw + g), y1, bw, rh);
-  setRect(C.hU, cx0, y2, bw, rh);
-  setRect(C.hM, cx0 + bw + g, y2, bw, rh);
-  setRect(C.hD, cx0 + 2 * (bw + g), y2, bw, rh);
-  setRect(C.hslide, cx0, y3, cw, rh);
-  setRect(C.reset, cx0, y4, bw, rh);
-  setRect(C.shuffle, cx0 + bw + g, y4, bw, rh);
-  setRect(C.quit, cx0 + 2 * (bw + g), y4, bw, rh);
+  const sw = clamp(VW * 0.095, 34, 54);
+  const vLabelPad = clamp(VH * 0.025, 16, 24);
+  const sh = Math.min(clamp(areaH * 0.72, 100, 380), Math.max(70, areaH - 2 * vLabelPad));
+  const vSlideY = areaTop + (areaH - sh) / 2;
+  setRect(C.vslide, cx0, vSlideY, sw, sh);
 
-  const vsBottom = C.vslide.rect.y + C.vslide.rect.h;
+  const cubeLeftMin = cx0 + sw + Math.max(10, VW * 0.02);
+  const cubeAvailW = Math.max(90, cx1 - cubeLeftMin);
+  /* 2.72*scale is the worst-case projected half-extent of the 3x3x3 cube */
+  const scale = clamp(Math.min(cubeAvailW / 5.55, areaH / 5.55), 22, 125);
+  const cubeCx = clamp(cubeLeftMin + cubeAvailW / 2, cubeLeftMin + scale * 2.75, cx1 - scale * 2.75);
+  const cubeCy = areaTop + areaH / 2;
+  L.cube = { cx: cubeCx, cy: cubeCy, scale };
+
   L.labels = {
-    vSlices: { x: VW / 2, y: y1 - gapR * 0.5 },
-    hSlices: { x: VW / 2, y: y2 - gapR * 0.5 },
-    hView:   { x: VW / 2, y: y3 - gapR * 0.5 },
-    hViewVal:{ x: VW / 2, y: y3 + rh + gapR * 0.5 },
-    vView:   { x: C.vslide.rect.x, y: vsBottom + 14, align: 'left' },
-    vViewVal:{ x: C.vslide.rect.x, y: vsBottom + 30, align: 'left' }
+    vView:    { x: cx0, y: vSlideY - 12, align: 'left' },
+    vViewVal: { x: ccx(C.vslide), y: vSlideY + sh + 12, align: 'center' },
+    hView:    { x: cx0 + cw / 2, y: hSlideY - Math.max(11, labelLead * 0.5) },
+    hViewVal: { x: cx0 + cw / 2, y: hSlideY + rowH + midGap * 0.45 }
   };
 }
 
-/* --- landscape phones / desktops: cube centered, controls around --- */
+/* --- landscape phones/tablets/desktops: HUD top, vertical slider left, cube center, actions + horizontal slider bottom --- */
 function layoutLandscape() {
-  const padY = Math.max(10, VH * 0.02);
-  const padBase = Math.max(12, VW * 0.015);
-  const left = insets.l + padBase;
-  const right = VW - insets.r - padBase;
-  const top = insets.t;
-  const bottom = VH - insets.b;
+  const framePad = 12;
+  const padX = Math.max(14, VW * 0.018);
+  const left = insets.l + padX;
+  const right = VW - insets.r - padX;
+  const availW = Math.max(240, right - left);
 
-  L.hudH = clamp(VH * 0.13, 44, 90);
-  const hudBottom = top + L.hudH;
-  const areaTop = hudBottom;
-  const areaBottom = bottom - padY;
-  const areaH = Math.max(160, areaBottom - areaTop);
+  L.hudTop = insets.t + framePad;
+  L.hudH = clamp(VH * 0.125, 44, 82);
+  const hudBottom = L.hudTop + L.hudH;
 
-  /* cube slightly left of centre (right column takes the edge) */
-  const scale = clamp(Math.min(areaH * 0.135, VW * 0.085), 26, 150);
-  const cubeCx = left + (right - left) * 0.47;
-  /* vertical slice buttons (L M R) sit above the cube */
-  const tbW = clamp(VH * 0.19, 60, 100);
-  const tbH = clamp(VH * 0.12, 42, 62);
-  const tgap = clamp(VH * 0.02, 6, 14);
-  const rowW = 3 * tbW + 2 * tgap;
-  const rowX = cubeCx - rowW / 2;
-  const rowY = areaTop + clamp(areaH * 0.055, 8, 30);
-  /* keep the cube far enough below the top row even in very short windows */
-  const cubeCy = Math.max(areaTop + areaH * 0.52, rowY + tbH + scale * 1.9 + 8);
-  L.cube = { cx: cubeCx, cy: cubeCy, scale };
-  setRect(C.vL, rowX, rowY, tbW, tbH);
-  setRect(C.vM, rowX + tbW + tgap, rowY, tbW, tbH);
-  setRect(C.vR, rowX + 2 * (tbW + tgap), rowY, tbW, tbH);
+  /* bottom row: action buttons on the left, horizontal view slider on the right */
+  const bottomPad = insets.b + Math.max(12, VH * 0.02);
+  const bottomH = clamp(VH * 0.13, 38, 62);
+  const bottomY = VH - bottomPad - bottomH;
 
-  /* horizontal slice buttons (U M D) on the right edge */
-  const rbW = clamp(VH * 0.17, 56, 96);
-  const rbH = clamp(VH * 0.12, 42, 64);
-  const rgap = clamp(VH * 0.03, 8, 18);
-  const colH = 3 * rbH + 2 * rgap;
-  const colX = right - rbW;
-  const colY = cubeCy - colH / 2;
-  setRect(C.hU, colX, colY, rbW, rbH);
-  setRect(C.hM, colX, colY + rbH + rgap, rbW, rbH);
-  setRect(C.hD, colX, colY + 2 * (rbH + rgap), rbW, rbH);
+  const abGap = clamp(VW * 0.009, 6, 14);
+  const maxBtnGroup = availW * 0.54;
+  const abW = clamp(Math.min(availW * 0.115, (maxBtnGroup - 2 * abGap) / 3), 72, 155);
+  setRect(C.reset,   left,                  bottomY, abW, bottomH);
+  setRect(C.shuffle, left + abW + abGap,    bottomY, abW, bottomH);
+  setRect(C.quit,    left + 2 * (abW + abGap), bottomY, abW, bottomH);
 
-  /* vertical view slider on the left edge */
-  const vsW = clamp(VH * 0.11, 36, 56);
-  let vsH = clamp(areaH * 0.6, 140, 420);
-  let vsY = Math.max(cubeCy - vsH / 2, hudBottom + 34); // room for its labels
-  vsH = Math.min(vsH, Math.max(80, areaBottom - vsY));
-  setRect(C.vslide, left, vsY, vsW, vsH);
-
-  /* bottom row: action buttons left, horizontal view slider right */
-  const bottomH = clamp(VH * 0.13, 44, 64);
-  const bottomY = areaBottom - bottomH;
-  const abGap = clamp(VW * 0.008, 6, 14);
-  const abW = clamp(VW * 0.115, 86, 160);
-  setRect(C.reset, left, bottomY, abW, bottomH);
-  setRect(C.shuffle, left + abW + abGap, bottomY, abW, bottomH);
-  setRect(C.quit, left + 2 * (abW + abGap), bottomY, abW, bottomH);
-  const hsX = left + 3 * (abW + abGap) + clamp(VW * 0.02, 14, 30);
-  const hsW = Math.max(60, right - hsX);
+  const btnEnd = left + 3 * abW + 2 * abGap;
+  const midGap = clamp(VW * 0.025, 14, 36);
+  const maxHsW = Math.max(100, right - (btnEnd + midGap));
+  const hsW = clamp(availW * 0.40, 110, Math.min(maxHsW, 480));
+  const hsX = right - hsW;
   setRect(C.hslide, hsX, bottomY, hsW, bottomH);
 
-  L.labels = {
-    vSlices: { x: cubeCx, y: Math.max(rowY - 10, hudBottom + 8) },
-    hSlices: { x: colX - Math.max(10, rbW * 0.25), y: cubeCy, rot: true },
-    vView:   { x: C.vslide.rect.x, y: C.vslide.rect.y - 26, align: 'left' },
-    vViewVal:{ x: C.vslide.rect.x, y: C.vslide.rect.y - 12, align: 'left' },
-    hView:   { x: hsX + hsW / 2, y: bottomY - 24 },
-    hViewVal:{ x: hsX + hsW / 2, y: bottomY - 10 }
-  };
-}
+  const hLabelTop = bottomY - clamp(VH * 0.07, 26, 36);
 
-function moveFocus(dx, dy) {
-  const cur = C[focusKey()];
-  let bestI = -1, bestScore = Infinity;
-  focusList.forEach((k, i) => {
-    if (k === focusKey()) return;
-    const t = C[k];
-    const vx = ccx(t) - ccx(cur);
-    const vy = ccy(t) - ccy(cur);
-    if (vx * dx + vy * dy < 24) return;        // must be roughly in direction
-    const off = Math.abs(vx * dy) + Math.abs(vy * dx); // cross-axis misalignment
-    const score = Math.hypot(vx, vy) + off * 2;
-    if (score < bestScore) { bestScore = score; bestI = i; }
-  });
-  if (bestI >= 0) focusIdx = bestI;
+  /* middle play zone: vertical slider left, cube centered */
+  const areaTop = hudBottom + Math.max(8, VH * 0.015);
+  const areaBottom = hLabelTop - Math.max(6, VH * 0.012);
+  const areaH = Math.max(96, areaBottom - areaTop);
+
+  const vsW = clamp(VH * 0.105, 34, 54);
+  const vLabelPad = clamp(VH * 0.04, 15, 22);
+  const vsH = Math.min(clamp(areaH * 0.72, 80, 380), Math.max(64, areaH - 2 * vLabelPad));
+  const vsY = areaTop + (areaH - vsH) / 2;
+  setRect(C.vslide, left, vsY, vsW, vsH);
+
+  const cubeLeftMin = left + vsW + Math.max(12, VW * 0.02);
+  const cubeAvailW = Math.max(90, right - cubeLeftMin);
+  const scale = clamp(Math.min(areaH / 5.55, cubeAvailW / 5.55), 22, 150);
+  const cubeCx = clamp(VW / 2, cubeLeftMin + scale * 2.75, right - scale * 2.75);
+  const cubeCy = areaTop + areaH / 2;
+  L.cube = { cx: cubeCx, cy: cubeCy, scale };
+
+  L.labels = {
+    vView:    { x: left, y: vsY - 12, align: 'left' },
+    vViewVal: { x: ccx(C.vslide), y: vsY + vsH + 12, align: 'center' },
+    hView:    { x: hsX + hsW / 2, y: bottomY - 22 },
+    hViewVal: { x: hsX + hsW / 2, y: bottomY - 9 }
+  };
 }
 
 function setSliderDeg(key, deg) {
@@ -507,9 +460,7 @@ function setSliderDeg(key, deg) {
 const sliderDeg = (key) => ((key === 'hslide' ? yaw : pitch) * 180 / Math.PI + 360) % 360;
 
 function activate(key) {
-  if (key === 'vL' || key === 'vM' || key === 'vR' || key === 'hU' || key === 'hM' || key === 'hD') {
-    doMove(C[key].axis, C[key].layer);
-  } else if (key === 'reset') {
+  if (key === 'reset') {
     yaw = DEFAULT_VIEW_RAD; pitch = DEFAULT_VIEW_RAD;
   } else if (key === 'shuffle') {
     reshuffle();
@@ -690,64 +641,24 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawArrowIcon(x, y, r, color) { // small clockwise circular arrow
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(1.5, r * 0.25);
-  ctx.beginPath();
-  ctx.arc(x, y, r, -2.4, 1.6);
-  ctx.stroke();
-  const a = 1.6;
-  const hx = x + Math.cos(a) * r, hy = y + Math.sin(a) * r;
-  const hl = r * 0.6;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(hx + Math.cos(a + 1.9) * hl, hy + Math.sin(a + 1.9) * hl);
-  ctx.lineTo(hx + Math.cos(a + 0.4) * hl, hy + Math.sin(a + 0.4) * hl);
-  ctx.lineTo(hx, hy);
-  ctx.closePath();
-  ctx.fill();
-}
-
 function fitFont(text, w, h, max) {
   const f = Math.min(max, w / (0.62 * text.length), h * 0.5);
   return Math.max(9, Math.round(f));
 }
 
-function drawMoveButton(c, focused) {
+function drawActionButton(c, danger) {
   const { x, y, w, h } = c.rect;
   ctx.save();
-  if (focused) { ctx.shadowColor = GOLD; ctx.shadowBlur = 14 * GLOW; }
+  if (danger) { ctx.shadowColor = RED; ctx.shadowBlur = 8 * GLOW; }
   else { ctx.shadowColor = NEON; ctx.shadowBlur = 6 * GLOW; }
   roundRect(x, y, w, h, Math.min(9, h * 0.18));
   ctx.fillStyle = PANEL;
   ctx.fill();
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = focused ? GOLD : BLUE;
-  ctx.lineWidth = focused ? 3 : 2;
+  ctx.strokeStyle = danger ? RED : BLUE;
+  ctx.lineWidth = 2;
   ctx.stroke();
-  drawArrowIcon(x + w * 0.24, y + h / 2, clamp(h * 0.2, 7, 12), focused ? GOLD : NEON);
-  ctx.fillStyle = focused ? GOLD : ICE;
-  ctx.font = 'bold ' + Math.max(12, Math.round(Math.min(L.fonts.btn, h * 0.48, w * 0.36))) + 'px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(c.label, x + w * 0.62, y + h / 2 + 1);
-  ctx.restore();
-}
-
-function drawActionButton(c, focused, danger) {
-  const { x, y, w, h } = c.rect;
-  ctx.save();
-  if (focused) { ctx.shadowColor = GOLD; ctx.shadowBlur = 14 * GLOW; }
-  else if (danger) { ctx.shadowColor = RED; ctx.shadowBlur = 8 * GLOW; }
-  else { ctx.shadowColor = NEON; ctx.shadowBlur = 6 * GLOW; }
-  roundRect(x, y, w, h, Math.min(9, h * 0.18));
-  ctx.fillStyle = PANEL;
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = focused ? GOLD : (danger ? RED : BLUE);
-  ctx.lineWidth = focused ? 3 : 2;
-  ctx.stroke();
-  ctx.fillStyle = focused ? GOLD : (danger ? PINK : ICE);
+  ctx.fillStyle = danger ? PINK : ICE;
   ctx.font = 'bold ' + fitFont(c.label, w - 14, h, L.fonts.action) + 'px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -755,7 +666,7 @@ function drawActionButton(c, focused, danger) {
   ctx.restore();
 }
 
-function drawSlider(key, focused) {
+function drawSlider(key) {
   const r = C[key].rect;
   const deg = sliderDeg(key);
   const vertical = key === 'vslide';
@@ -765,7 +676,7 @@ function drawSlider(key, focused) {
   ctx.save();
   if (vertical) {
     // track
-    ctx.strokeStyle = focused ? NEON : BLUE;
+    ctx.strokeStyle = BLUE;
     ctx.lineWidth = Math.max(3, 5 * L.u);
     ctx.beginPath();
     ctx.moveTo(cx, r.y + pad);
@@ -785,17 +696,17 @@ function drawSlider(key, focused) {
     // knob
     const ky = r.y + pad + t * (r.h - 2 * pad);
     ctx.shadowColor = NEON;
-    ctx.shadowBlur = (focused ? 14 : 8) * GLOW;
+    ctx.shadowBlur = 8 * GLOW;
     ctx.beginPath();
     ctx.arc(cx, ky, L.knob, 0, Math.PI * 2);
-    ctx.fillStyle = focused ? GOLD : NEON;
+    ctx.fillStyle = NEON;
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = focused ? WHITE : ICE;
+    ctx.strokeStyle = ICE;
     ctx.lineWidth = 2;
     ctx.stroke();
   } else {
-    ctx.strokeStyle = focused ? NEON : BLUE;
+    ctx.strokeStyle = BLUE;
     ctx.lineWidth = Math.max(3, 5 * L.u);
     ctx.beginPath();
     ctx.moveTo(r.x + pad, cy);
@@ -813,13 +724,13 @@ function drawSlider(key, focused) {
     }
     const kx = r.x + pad + t * (r.w - 2 * pad);
     ctx.shadowColor = NEON;
-    ctx.shadowBlur = (focused ? 14 : 8) * GLOW;
+    ctx.shadowBlur = 8 * GLOW;
     ctx.beginPath();
     ctx.arc(kx, cy, L.knob, 0, Math.PI * 2);
-    ctx.fillStyle = focused ? GOLD : NEON;
+    ctx.fillStyle = NEON;
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = focused ? WHITE : ICE;
+    ctx.strokeStyle = ICE;
     ctx.lineWidth = 2;
     ctx.stroke();
   }
@@ -831,12 +742,6 @@ function drawSlider(key, focused) {
     ctx.textAlign = vp.align === 'left' ? 'left' : 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(Math.round(deg) + '°', vp.x, vp.y);
-  }
-  if (focused) {
-    ctx.strokeStyle = GOLD;
-    ctx.lineWidth = 2;
-    roundRect(r.x - 4, r.y - 4, r.w + 8, r.h + 8, 10);
-    ctx.stroke();
   }
   ctx.restore();
 }
@@ -873,9 +778,9 @@ function bestStr() {
 
 function drawHUD(now) {
   const t = timerOn ? performance.now() - startTime : elapsed;
-  const top = insets.t;
-  const padL = insets.l + Math.max(10, VW * 0.014);
-  const padR = VW - insets.r - Math.max(10, VW * 0.014);
+  const top = L.hudTop;
+  const padL = insets.l + Math.max(16, VW * 0.018);
+  const padR = VW - insets.r - Math.max(16, VW * 0.018);
   ctx.save();
   ctx.textBaseline = 'middle';
   // logo
@@ -886,26 +791,8 @@ function drawHUD(now) {
   ctx.textAlign = 'left';
   ctx.fillText('RUBIX', padL, top + L.hudH * (portrait ? 0.32 : 0.5));
   ctx.shadowBlur = 0;
-  // best record
-  if (portrait) {
-    // narrow screen: second line under the logo
-    const by = top + L.hudH * 0.74;
-    ctx.font = 'bold ' + L.fonts.hudSmall + 'px monospace';
-    ctx.fillStyle = DIM;
-    ctx.fillText('BEST ', padL, by);
-    ctx.fillStyle = ICE;
-    ctx.fillText(bestStr(), padL + ctx.measureText('BEST ').width, by);
-  } else {
-    ctx.textAlign = 'right';
-    ctx.fillStyle = DIM;
-    ctx.font = 'bold ' + L.fonts.hudSmall + 'px monospace';
-    ctx.fillText('BEST', padR, top + L.hudH * 0.30);
-    ctx.fillStyle = ICE;
-    ctx.font = 'bold ' + L.fonts.hudValSm + 'px monospace';
-    ctx.fillText(bestStr(), padR, top + L.hudH * 0.66);
-  }
   // time + moves
-  const statX = portrait ? [VW * 0.58, VW * 0.84] : [VW * 0.40, VW * 0.58];
+  const statX = portrait ? [VW * 0.64, VW * 0.87] : [VW * 0.38, VW * 0.57];
   ctx.textAlign = 'center';
   for (let i = 0; i < 2; i++) {
     const x = statX[i];
@@ -916,12 +803,35 @@ function drawHUD(now) {
     ctx.font = 'bold ' + L.fonts.hudVal + 'px monospace';
     ctx.fillText(i === 0 ? fmtTime(t) : String(moves).padStart(3, '0'), x, top + L.hudH * 0.70);
   }
-  // divider under the HUD strip
+  // best record
+  if (portrait) {
+    // narrow screen: second line under the logo, bounded before TIME
+    const by = top + L.hudH * 0.74;
+    ctx.textAlign = 'left';
+    ctx.font = 'bold ' + L.fonts.hudSmall + 'px monospace';
+    const timeLeft = statX[0] - L.fonts.hudVal * 2.6;
+    const bestLabel = 'BEST ';
+    const bestLabelW = ctx.measureText(bestLabel).width;
+    const maxValW = Math.max(50, timeLeft - padL - bestLabelW - 8);
+    ctx.fillStyle = DIM;
+    ctx.fillText(bestLabel, padL, by);
+    ctx.fillStyle = ICE;
+    ctx.fillText(bestStr(), padL + bestLabelW, by, maxValW);
+  } else {
+    ctx.textAlign = 'right';
+    ctx.fillStyle = DIM;
+    ctx.font = 'bold ' + L.fonts.hudSmall + 'px monospace';
+    ctx.fillText('BEST', padR, top + L.hudH * 0.30);
+    ctx.fillStyle = ICE;
+    ctx.font = 'bold ' + L.fonts.hudValSm + 'px monospace';
+    ctx.fillText(bestStr(), padR, top + L.hudH * 0.66);
+  }
+  // divider under the HUD strip (kept inside the inner frame)
   ctx.strokeStyle = BLUE;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(insets.l, top + L.hudH + 1);
-  ctx.lineTo(VW - insets.r, top + L.hudH + 1);
+  ctx.moveTo(insets.l + 12, top + L.hudH + 1);
+  ctx.lineTo(VW - insets.r - 12, top + L.hudH + 1);
   ctx.stroke();
   ctx.restore();
 }
@@ -943,9 +853,10 @@ function drawTitle(now) {
   drawBackground();
   const cx = VW / 2;
   const m = Math.min(VW, VH);
+  const maxTextW = Math.max(160, VW - insets.l - insets.r - 44);
   // decorative spinning cube
-  const sc = clamp(Math.min(VW * 0.16, VH * 0.09), 28, 80);
-  const cy = VH * 0.26;
+  const sc = clamp(Math.min(VW * 0.15, VH * 0.085), 22, 80);
+  const cy = VH * 0.25;
   const a = now * 0.00045;
   drawCube(cx, cy, sc, a, 0.5, now);
   // logo
@@ -954,31 +865,30 @@ function drawTitle(now) {
   ctx.textBaseline = 'middle';
   if (blinkOn(now)) {
     ctx.fillStyle = GOLD;
-    ctx.font = 'bold ' + Math.round(clamp(m * 0.03, 14, 22)) + 'px monospace';
-    ctx.fillText(isCoarse ? 'TAP TO START' : 'TAP OR PRESS ANY KEY TO START', cx, VH * 0.55);
+    ctx.font = 'bold ' + Math.round(clamp(m * 0.03, 13, 22)) + 'px monospace';
+    ctx.fillText(isCoarse ? 'TAP TO START' : 'CLICK OR TAP TO START', cx, VH * 0.53, maxTextW);
   }
   ctx.shadowColor = NEON;
   ctx.shadowBlur = 26 * GLOW;
   ctx.fillStyle = WHITE;
-  ctx.font = 'bold ' + Math.round(clamp(m * 0.155, 36, 92)) + 'px monospace';
-  ctx.fillText('RUBIX', cx, VH * 0.66);
+  ctx.font = 'bold ' + Math.round(clamp(m * 0.145, 34, 92)) + 'px monospace';
+  ctx.fillText('RUBIX', cx, VH * 0.635, maxTextW);
   ctx.shadowBlur = 12 * GLOW;
   ctx.fillStyle = NEON;
-  ctx.fillText('RUBIX', cx, VH * 0.66);
+  ctx.fillText('RUBIX', cx, VH * 0.635, maxTextW);
   ctx.shadowBlur = 0;
   ctx.fillStyle = ICE;
   ctx.font = 'bold ' + Math.round(clamp(m * 0.022, 10, 18)) + 'px monospace';
-  ctx.fillText('A R C A D I C   C U B E   S O L V E R', cx, VH * 0.735);
+  ctx.fillText('A R C A D I C   C U B E   S O L V E R', cx, VH * 0.725, maxTextW);
   if (best.time !== null) {
     ctx.fillStyle = LIME;
-    ctx.font = 'bold ' + Math.round(clamp(m * 0.02, 11, 16)) + 'px monospace';
-    ctx.fillText('RECORD  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', cx, VH * 0.785);
+    ctx.font = 'bold ' + Math.round(clamp(m * 0.02, 10, 16)) + 'px monospace';
+    ctx.fillText('RECORD  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', cx, VH * 0.785, maxTextW);
   }
   ctx.fillStyle = DIM;
   ctx.font = 'bold ' + Math.round(clamp(m * 0.017, 9, 14)) + 'px monospace';
-  ctx.fillText(isCoarse
-    ? 'DRAG CUBE SLICES TO ROTATE · SLIDERS OR BG TO ROTATE VIEW'
-    : 'DRAG CUBE SLICES TO ROTATE · ARROWS / ENTER / BUTTONS ALSO WORK', cx, VH * 0.92);
+  ctx.fillText('DRAG A CUBE FACE TO ROTATE ITS SLICE', cx, VH * 0.875, maxTextW);
+  ctx.fillText('USE SLIDERS OR DRAG BACKGROUND TO ROTATE VIEW', cx, VH * 0.92, maxTextW);
   ctx.restore();
 }
 
@@ -998,16 +908,6 @@ function drawPlay(now) {
     ctx.fillText(txt, l.x, l.y);
     ctx.textAlign = 'center';
   };
-  label('VERTICAL SLICES · CLOCKWISE', lb.vSlices);
-  if (lb.hSlices) {
-    if (lb.hSlices.rot) {
-      ctx.save();
-      ctx.translate(lb.hSlices.x, lb.hSlices.y);
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillText('HORIZONTAL SLICES', 0, 0);
-      ctx.restore();
-    } else label('HORIZONTAL SLICES', lb.hSlices);
-  }
   label('VERTICAL VIEW', lb.vView);
   label('HORIZONTAL VIEW', lb.hView);
   ctx.restore();
@@ -1030,19 +930,18 @@ function drawPlay(now) {
     ctx.restore();
   }
   // controls
-  const fk = focusKey();
-  for (const k of ['vL', 'vM', 'vR', 'hU', 'hM', 'hD']) drawMoveButton(C[k], k === fk);
-  for (const k of ['reset', 'shuffle', 'quit'])
-    drawActionButton(C[k], k === fk, k === 'quit');
-  drawSlider('vslide', fk === 'vslide');
-  drawSlider('hslide', fk === 'hslide');
+  for (const k of actionKeys) drawActionButton(C[k], k === 'quit');
+  drawSlider('vslide');
+  drawSlider('hslide');
 }
 
 function drawEnd(now) {
   drawBackground();
   const cx = VW / 2;
   const m = Math.min(VW, VH);
-  drawCube(cx, VH * 0.24, clamp(Math.min(VW * 0.14, VH * 0.09), 24, 60), -Math.PI / 4, -0.35, now);
+  const maxTextW = Math.max(160, VW - insets.l - insets.r - 44);
+  const sc = clamp(Math.min(VW * 0.14, VH * 0.072), 20, 60);
+  drawCube(cx, Math.max(insets.t + 16 + sc * 2.72, VH * 0.24), sc, -Math.PI / 4, -0.35, now);
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -1050,7 +949,7 @@ function drawEnd(now) {
   ctx.shadowBlur = 18 * GLOW;
   ctx.fillStyle = LIME;
   ctx.font = 'bold ' + Math.round(clamp(m * 0.065, 20, 46)) + 'px monospace';
-  ctx.fillText('CUBE SOLVED', cx, VH * 0.47);
+  ctx.fillText('CUBE SOLVED', cx, VH * 0.47, maxTextW);
   ctx.shadowBlur = 0;
   const sx = Math.max(VW * 0.16, 80);
   ctx.fillStyle = DIM;
@@ -1067,19 +966,19 @@ function drawEnd(now) {
     ctx.shadowBlur = 14 * GLOW;
     ctx.fillStyle = GOLD;
     ctx.font = 'bold ' + Math.round(clamp(m * 0.035, 14, 24)) + 'px monospace';
-    if (endRecT && endRecM) ctx.fillText('★ DOUBLE NEW RECORD ★', cx, VH * 0.70);
-    else if (endRecT) ctx.fillText('★ NEW RECORD — TIME ★', cx, VH * 0.70);
-    else ctx.fillText('★ NEW RECORD — MOVES ★', cx, VH * 0.70);
+    if (endRecT && endRecM) ctx.fillText('★ DOUBLE NEW RECORD ★', cx, VH * 0.70, maxTextW);
+    else if (endRecT) ctx.fillText('★ NEW RECORD — TIME ★', cx, VH * 0.70, maxTextW);
+    else ctx.fillText('★ NEW RECORD — MOVES ★', cx, VH * 0.70, maxTextW);
     ctx.shadowBlur = 0;
   }
   if (blinkOn(now)) {
     ctx.fillStyle = ICE;
     ctx.font = 'bold ' + Math.round(clamp(m * 0.028, 13, 20)) + 'px monospace';
-    ctx.fillText(isCoarse ? 'TAP TO PLAY AGAIN' : 'PRESS ENTER OR TAP TO PLAY AGAIN', cx, VH * 0.845);
+    ctx.fillText(isCoarse ? 'TAP TO PLAY AGAIN' : 'CLICK OR TAP TO PLAY AGAIN', cx, VH * 0.845, maxTextW);
   }
   ctx.fillStyle = DIM;
   ctx.font = 'bold ' + Math.round(clamp(m * 0.018, 10, 14)) + 'px monospace';
-  ctx.fillText('BEST  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', cx, VH * 0.925);
+  ctx.fillText('BEST  ' + fmtTime(best.time) + '  ·  ' + best.moves + ' MOVES', cx, VH * 0.925, maxTextW);
   ctx.restore();
 }
 
@@ -1123,7 +1022,6 @@ canvas.addEventListener('pointerdown', (e) => {
   // 1. Sliders
   for (const k of ['vslide', 'hslide']) {
     if (inRect(p, C[k].rect, L.touchPad + 4)) {
-      focusIdx = focusList.indexOf(k);
       applySliderAt(k, p);
       dragKey = k;
       if (canvas.setPointerCapture) {
@@ -1133,11 +1031,9 @@ canvas.addEventListener('pointerdown', (e) => {
     }
   }
 
-  // 2. Control buttons
-  for (const k of focusList) {
-    if (isSlideKey(k)) continue;
+  // 2. Action buttons
+  for (const k of actionKeys) {
     if (inRect(p, C[k].rect)) {
-      focusIdx = focusList.indexOf(k);
       activate(k);
       return;
     }
@@ -1180,7 +1076,7 @@ canvas.addEventListener('pointermove', (e) => {
   // Dynamic cursor style when hovering on play screen
   if (!dragKey && !cubeDrag && !viewDrag && screen === 'play') {
     let overInteractive = false;
-    for (const k of focusList) {
+    for (const k of controlKeys) {
       if (inRect(p, C[k].rect, isSlideKey(k) ? L.touchPad + 4 : L.touchPad)) {
         overInteractive = true;
         break;
@@ -1277,40 +1173,6 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 document.addEventListener('dblclick', (e) => e.preventDefault());
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 
-window.addEventListener('keydown', (e) => {
-  const k = e.key;
-  if (screen === 'title') { startGame(); return; }
-  if (screen === 'end') {
-    if (performance.now() >= endReadyAt) startGame();
-    return;
-  }
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Enter'].includes(k))
-    e.preventDefault();
-  const fk = focusKey();
-  switch (k) {
-    case 'ArrowUp':
-      if (fk === 'vslide') setSliderDeg('vslide', sliderDeg('vslide') - 15);
-      else moveFocus(0, -1);
-      break;
-    case 'ArrowDown':
-      if (fk === 'vslide') setSliderDeg('vslide', sliderDeg('vslide') + 15);
-      else moveFocus(0, 1);
-      break;
-    case 'ArrowLeft':
-      if (fk === 'hslide') setSliderDeg('hslide', sliderDeg('hslide') - 15);
-      else moveFocus(-1, 0);
-      break;
-    case 'ArrowRight':
-      if (fk === 'hslide') setSliderDeg('hslide', sliderDeg('hslide') + 15);
-      else moveFocus(1, 0);
-      break;
-    case 'Enter':
-    case ' ':
-      if (!e.repeat) activate(fk);
-      break;
-  }
-});
-
 /* ---------------- main loop ---------------- */
 function frame(now) {
   if (anim && now - anim.start >= anim.dur) commitAnim(now);
@@ -1327,7 +1189,7 @@ frame(performance.now());            // draws immediately, then chains rAF
 /* test hook (harmless in normal browser use) */
 if (typeof window !== 'undefined' && window.__RUBIX_TEST__) {
   window.__rubix = {
-    state: () => ({ VW, VH, portrait, insets, L, C, focusList, screen, anim, pending, moves, yaw, pitch, cubeDrag, viewDrag }),
+    state: () => ({ VW, VH, portrait, insets, L, C, controlKeys, screen, anim, pending, moves, yaw, pitch, cubeDrag, viewDrag }),
     setScreen: (s) => { screen = s; },
     startGame,
     activate,
@@ -1352,6 +1214,6 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     Q, cubies, resetCube, moveQuat, applyMove, isSolved, doMove,
     hitTestCube, getFaceTangents, projectPoint, getViewQuat, pointInPoly,
-    FACE_DEFS, L, C, focusList, DEFAULT_VIEW_DEG, DEFAULT_VIEW_RAD
+    FACE_DEFS, L, C, controlKeys, actionKeys, DEFAULT_VIEW_DEG, DEFAULT_VIEW_RAD
   };
 }

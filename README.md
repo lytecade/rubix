@@ -5,18 +5,14 @@ Built with pure HTML5 Canvas + vanilla JavaScript — no external libraries, no 
 
 ## How to play
 
-1. Tap / click anywhere, or press any key, on the title screen to start.
-2. The cube is shuffled. Both vertical and horizontal views start at an angular 35° view for clear 3D perspective. Rotate the slices using dynamic click-and-drag or the on-screen buttons:
-   - **Click & drag on any cubie face**:
-     - Drag vertically (up or down) to rotate the corresponding vertical slice in that direction.
-     - Drag horizontally (left or right) to rotate the corresponding horizontal slice in that direction.
-   - **Buttons** (or keyboard):
-     - **Top buttons (L / M / R)** — rotate vertical slices.
-     - **Right buttons (U / M / D)** — rotate horizontal slices.
+1. Tap / click anywhere on the title screen to start.
+2. The cube is shuffled. Both vertical and horizontal views start at an angular 35° view for clear 3D perspective. Rotate slices using touch or click-and-drag directly on the cube:
+   - **Touch / click & drag on any cubie face**:
+     - Drag in the direction you want that row or column to rotate (up, down, left, or right) to turn the corresponding slice.
 3. Inspect the cube:
-   - **Click & drag on empty background** — freely orbit camera yaw and pitch.
+   - **Touch / click & drag on empty background** — freely orbit camera yaw and pitch.
    - **Sliders** — vertical view rotation (left) and horizontal view rotation (bottom).
-4. Bottom buttons:
+4. Action buttons:
    - **RESET VIEW** — snap the view back to the default angular view (35°, 35°).
    - **SHUFFLE** — new scramble; timer and move counter reset to zero.
    - **QUIT** — abandon the run (no score) and return to the menu.
@@ -25,10 +21,10 @@ Built with pure HTML5 Canvas + vanilla JavaScript — no external libraries, no 
 
 ## Controls
 
-| Action | Mouse / touch | Keyboard |
-|---|---|---|
-| Start / play again | Tap anywhere | Any key |
-| Rotate a slice | Click/touch and drag any cubie on the cube in the direction of the turn (up/down/left/right) or tap a slice button | Arrows to focus a button, **Enter / Space** to press |
-| Rotate view | Drag empty background or drag sliders | Focus a slider (arrows), then **←/→** adjusts bottom slider, **↑/↓** adjusts left slider (15° steps) |
-| Reset view / shuffle / quit | Tap the button | Focus with arrows, **Enter / Space** |
+| Action | Touch / Mouse |
+|---|---|
+| Start / play again | Tap / click anywhere |
+| Rotate a slice | Touch / click and drag any cubie face on the cube in the direction of the turn |
+| Rotate view | Drag empty background or drag the vertical / horizontal view sliders |
+| Reset view / shuffle / quit | Tap / click the button |
 
