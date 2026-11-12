@@ -6,7 +6,7 @@ Built with pure HTML5 Canvas + vanilla JavaScript — no external libraries, no 
 ## How to play
 
 1. Tap / click anywhere, or press any key, on the title screen to start.
-2. The cube is shuffled. Rotate the slices using dynamic click-and-drag or the on-screen buttons:
+2. The cube is shuffled. Both vertical and horizontal views start at an angular 35° view for clear 3D perspective. Rotate the slices using dynamic click-and-drag or the on-screen buttons:
    - **Click & drag on any cubie face**:
      - Drag vertically (up or down) to rotate the corresponding vertical slice in that direction.
      - Drag horizontally (left or right) to rotate the corresponding horizontal slice in that direction.
@@ -17,7 +17,7 @@ Built with pure HTML5 Canvas + vanilla JavaScript — no external libraries, no 
    - **Click & drag on empty background** — freely orbit camera yaw and pitch.
    - **Sliders** — vertical view rotation (left) and horizontal view rotation (bottom).
 4. Bottom buttons:
-   - **RESET VIEW** — snap the view back to the front face (0°, 0°).
+   - **RESET VIEW** — snap the view back to the default angular view (35°, 35°).
    - **SHUFFLE** — new scramble; timer and move counter reset to zero.
    - **QUIT** — abandon the run (no score) and return to the menu.
 5. The timer starts on your first move. Solve all six faces to finish —

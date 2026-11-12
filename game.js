@@ -199,7 +199,9 @@ function isSolved() {
 
 /* ---------------- game state ---------------- */
 let screen = 'title';          // 'title' | 'play' | 'end'
-let yaw = 0, pitch = 0;        // view rotation (radians)
+const DEFAULT_VIEW_DEG = 35;
+const DEFAULT_VIEW_RAD = DEFAULT_VIEW_DEG * Math.PI / 180;
+let yaw = DEFAULT_VIEW_RAD, pitch = DEFAULT_VIEW_RAD; // view rotation (radians)
 let moves = 0;
 let startTime = 0, timerOn = false, elapsed = 0;
 let anim = null;               // {axis, layer, start, dur}
@@ -243,14 +245,16 @@ function reshuffle() {
   timerOn = false;
   startTime = 0;
   elapsed = 0;
-  yaw = 0;
-  pitch = 0;
+  yaw = DEFAULT_VIEW_RAD;
+  pitch = DEFAULT_VIEW_RAD;
   anim = null;
   pending = null;
 }
 
 function startGame() {
   reshuffle();
+  yaw = DEFAULT_VIEW_RAD;
+  pitch = DEFAULT_VIEW_RAD;
   focusIdx = 1; // start focused on M (vertical middle)
   screen = 'play';
 }
@@ -311,7 +315,6 @@ const L = {
   touchPad: 12,         // hit-test padding around controls
   knob: 13,             // slider knob radius
   cube: { cx: 0, cy: 0, scale: 50 },
-  ring: { cx: 0, cy: 0, rx: 100, ry: 20 },
   fonts: {},
   labels: {}
 };
@@ -365,7 +368,6 @@ function layoutPortrait() {
   const scale = clamp(Math.min(VW * 0.155, cubeBudget / 5.05), 24, 120);
   const cubeCy = hudBottom + gapTop + scale * 1.9;
   L.cube = { cx: VW / 2, cy: cubeCy, scale };
-  L.ring = { cx: VW / 2, cy: cubeCy + scale * 2.45, rx: scale * 2.5, ry: scale * 0.36 };
 
   /* vertical view slider beside the cube (left margin) */
   const sw = clamp(VW * 0.11, 36, 56);
@@ -437,7 +439,6 @@ function layoutLandscape() {
   /* keep the cube far enough below the top row even in very short windows */
   const cubeCy = Math.max(areaTop + areaH * 0.52, rowY + tbH + scale * 1.9 + 8);
   L.cube = { cx: cubeCx, cy: cubeCy, scale };
-  L.ring = { cx: cubeCx, cy: cubeCy + scale * 2.35, rx: scale * 2.5, ry: scale * 0.34 };
   setRect(C.vL, rowX, rowY, tbW, tbH);
   setRect(C.vM, rowX + tbW + tgap, rowY, tbW, tbH);
   setRect(C.vR, rowX + 2 * (tbW + tgap), rowY, tbW, tbH);
@@ -509,7 +510,7 @@ function activate(key) {
   if (key === 'vL' || key === 'vM' || key === 'vR' || key === 'hU' || key === 'hM' || key === 'hD') {
     doMove(C[key].axis, C[key].layer);
   } else if (key === 'reset') {
-    yaw = 0; pitch = 0;
+    yaw = DEFAULT_VIEW_RAD; pitch = DEFAULT_VIEW_RAD;
   } else if (key === 'shuffle') {
     reshuffle();
   } else if (key === 'quit') {
@@ -947,12 +948,6 @@ function drawTitle(now) {
   const cy = VH * 0.26;
   const a = now * 0.00045;
   drawCube(cx, cy, sc, a, 0.5, now);
-  // holo ring
-  ctx.strokeStyle = BLUE;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + sc * 2.6, sc * 2.7, sc * 0.4, 0, 0, Math.PI * 2);
-  ctx.stroke();
   // logo
   ctx.save();
   ctx.textAlign = 'center';
@@ -1016,12 +1011,6 @@ function drawPlay(now) {
   label('VERTICAL VIEW', lb.vView);
   label('HORIZONTAL VIEW', lb.hView);
   ctx.restore();
-  // holo ring under cube
-  ctx.strokeStyle = BLUE;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.ellipse(L.ring.cx, L.ring.cy, L.ring.rx, L.ring.ry, 0, 0, Math.PI * 2);
-  ctx.stroke();
   // the cube
   drawCube(L.cube.cx, L.cube.cy, L.cube.scale, yaw, pitch, now);
   // highlight actively dragged cubie face
@@ -1341,6 +1330,11 @@ if (typeof window !== 'undefined' && window.__RUBIX_TEST__) {
     state: () => ({ VW, VH, portrait, insets, L, C, focusList, screen, anim, pending, moves, yaw, pitch, cubeDrag, viewDrag }),
     setScreen: (s) => { screen = s; },
     startGame,
+    activate,
+    setSliderDeg,
+    sliderDeg,
+    DEFAULT_VIEW_DEG,
+    DEFAULT_VIEW_RAD,
     draw: () => frame(performance.now()),
     cubies,
     doMove,
@@ -1358,6 +1352,6 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     Q, cubies, resetCube, moveQuat, applyMove, isSolved, doMove,
     hitTestCube, getFaceTangents, projectPoint, getViewQuat, pointInPoly,
-    FACE_DEFS, L, C, focusList
+    FACE_DEFS, L, C, focusList, DEFAULT_VIEW_DEG, DEFAULT_VIEW_RAD
   };
 }
